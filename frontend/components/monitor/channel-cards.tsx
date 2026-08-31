@@ -75,6 +75,15 @@ type ChannelPageSize = 9 | 18 | 36 | 72 | 81 | "all"
 type GroupSortMode = "channel-asc" | "channel-desc" | "ratio-asc" | "ratio-desc"
 
 const channelPageSizeOptions: ChannelPageSize[] = [9, 18, 36, 72, 81, "all"]
+const CHANNEL_PAGE_SIZE_STORAGE_KEY = "upstream-ops:channel-page-size"
+
+function storedChannelPageSize(): ChannelPageSize {
+  if (typeof window === "undefined") return 9
+  const value = window.localStorage.getItem(CHANNEL_PAGE_SIZE_STORAGE_KEY)
+  if (value === "all") return value
+  const parsed = Number(value)
+  return channelPageSizeOptions.includes(parsed as ChannelPageSize) ? parsed as ChannelPageSize : 9
+}
 
 function pageNumbers(currentPage: number, totalPages: number) {
   const first = Math.max(1, currentPage - 3)
@@ -577,7 +586,7 @@ function SyncProgressStrip({ state }: { state: ChannelSyncState }) {
 export function ChannelCards() {
   const { data: channels, loading: channelsLoading } = useChannels()
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState<ChannelPageSize>(9)
+  const [pageSize, setPageSize] = useState<ChannelPageSize>(storedChannelPageSize)
   const pageQuery = useChannelsPage(page, pageSize === "all" ? -1 : pageSize)
   const refresh = useTriggerRefresh()
   const { confirm, dialog: confirmDialog } = useConfirm()
@@ -921,26 +930,26 @@ export function ChannelCards() {
                     </StatTile>
                     <StatTile label="今日消费">{money(c.today_cost)}</StatTile>
                     <StatTile label="累计消费">{money(c.total_cost)}</StatTile>
-                    <StatTile label="阈值 / 状态">
-                      <div className="flex min-w-0 items-center gap-1.5">
-                        <Tooltip delayDuration={150}>
-                          <TooltipTrigger asChild>
-                            <span className="truncate text-[11px] font-medium text-foreground">
-                              {c.balance_threshold > 0 ? money(c.balance_threshold) : "未设置"}
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" className="text-xs">
-                            {c.balance_threshold > 0
-                              ? `余额低于 ${money(c.balance_threshold)} 时通知`
-                              : "未开启低余额通知"}
-                          </TooltipContent>
-                        </Tooltip>
-                        <span className="text-[10px] text-muted-foreground">/</span>
-                        <span className={cn("inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset", meta.cls)}>
-                          {meta.label}
-                        </span>
-                      </div>
-                    </StatTile>
+                    {c.balance_threshold > 0 ? (
+                      <StatTile label="阈值 / 状态">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <Tooltip delayDuration={150}>
+                            <TooltipTrigger asChild>
+                              <span className="truncate text-[11px] font-medium text-foreground">
+                                {money(c.balance_threshold)}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-xs">
+                              {`余额低于 ${money(c.balance_threshold)} 时通知`}
+                            </TooltipContent>
+                          </Tooltip>
+                          <span className="text-[10px] text-muted-foreground">/</span>
+                          <span className={cn("inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset", meta.cls)}>
+                            {meta.label}
+                          </span>
+                        </div>
+                      </StatTile>
+                    ) : null}
                     <ChannelSubscriptionUsageMetricTiles channel={c} />
                     {c.last_error ? (
                       <div className="col-span-3 rounded-md border border-border bg-muted/20 px-2.5 py-2">
@@ -1114,7 +1123,9 @@ export function ChannelCards() {
                 <Select
                   value={String(pageSize)}
                   onValueChange={(value) => {
-                    setPageSize(value === "all" ? "all" : Number(value) as ChannelPageSize)
+                    const nextPageSize = value === "all" ? "all" : Number(value) as ChannelPageSize
+                    setPageSize(nextPageSize)
+                    window.localStorage.setItem(CHANNEL_PAGE_SIZE_STORAGE_KEY, String(nextPageSize))
                     setPage(1)
                   }}
                 >

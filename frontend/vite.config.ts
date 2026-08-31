@@ -25,4 +25,9 @@ export default defineConfig({
       '/v1':      { target: BACKEND_TARGET, changeOrigin: true },
     },
   },
+  // 生产构建直接写入 Go 的嵌入目录；emptyOutDir 确保旧哈希资源不会被保留。
+  build: {
+    outDir: path.resolve(__dirname, '../web/dist'),
+    emptyOutDir: true,
+  },
 })

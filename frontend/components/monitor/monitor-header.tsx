@@ -7,6 +7,7 @@ import {
   Home,
   LogOut,
   Menu,
+  Monitor,
   Moon,
   Network,
   RefreshCw,
@@ -38,7 +39,7 @@ import { toast } from "sonner"
 
 export function MonitorHeader() {
   const navigate = useNavigate()
-  const { theme, setTheme } = useTheme()
+  const { theme, setTheme, resolvedTheme } = useTheme()
   const { username, authDisabled, logout } = useAuth()
   const refresh = useTriggerRefresh()
   const channels = useChannels()
@@ -103,7 +104,8 @@ export function MonitorHeader() {
     }
   }
 
-  const isDark = mounted && theme === "dark"
+  const isDark = mounted && resolvedTheme === "dark"
+  const themeLabel = theme === "system" ? "自动" : theme === "dark" ? "深色" : "浅色"
 
   return (
     <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur-sm">
@@ -226,9 +228,20 @@ export function MonitorHeader() {
                   GitHub 仓库
                 </a>
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setTheme(isDark ? "light" : "dark")}>
-                {isDark ? <Moon className="size-4" /> : <Sun className="size-4" />}
-                {isDark ? "切换浅色主题" : "切换深色主题"}
+              <DropdownMenuLabel className="font-normal text-muted-foreground">
+                主题：{themeLabel}
+              </DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => setTheme("light")}>
+                <Sun className="size-4" />
+                浅色模式
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setTheme("dark")}>
+                <Moon className="size-4" />
+                深色模式
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setTheme("system")}>
+                <Monitor className="size-4" />
+                自动
               </DropdownMenuItem>
               {authDisabled ? null : (
                 <>
@@ -318,22 +331,39 @@ export function MonitorHeader() {
               </TooltipContent>
             </Tooltip>
 
-            <Tooltip delayDuration={200}>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-                  className="size-8 border-border bg-background text-foreground hover:bg-muted"
-                  aria-label="切换主题"
-                >
-                  {isDark ? <Moon className="size-3.5" /> : <Sun className="size-3.5" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs">
-                {isDark ? "深色模式 · 点击切换浅色" : "浅色模式 · 点击切换深色"}
-              </TooltipContent>
-            </Tooltip>
+            <DropdownMenu>
+              <Tooltip delayDuration={200}>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="size-8 border-border bg-background text-foreground hover:bg-muted"
+                      aria-label={`主题：${themeLabel}`}
+                    >
+                      {theme === "system" ? <Monitor className="size-3.5" /> : isDark ? <Moon className="size-3.5" /> : <Sun className="size-3.5" />}
+                    </Button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">
+                  {`主题：${themeLabel}`}
+                </TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => setTheme("light")}>
+                  <Sun className="size-4" />
+                  浅色模式
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setTheme("dark")}>
+                  <Moon className="size-4" />
+                  深色模式
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setTheme("system")}>
+                  <Monitor className="size-4" />
+                  自动
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             {authDisabled ? null : (
               <Tooltip delayDuration={200}>

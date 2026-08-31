@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react"
 import { Loader2, Plus, RefreshCw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -32,6 +33,8 @@ import type {
 } from "@/lib/api-types"
 import {
   ModelMappingEditor,
+  parseMappingJSON,
+  serializeMappingJSON,
   type MappingRow,
 } from "./model-mapping-editor"
 import {
@@ -70,6 +73,83 @@ function modelsModeHint(mode: string): string {
   )
 }
 
+function RouteMappingEditor({
+  raw,
+  onChange,
+}: {
+  raw?: string
+  onChange: (value: string) => void
+}) {
+  const [rows, setRows] = useState<MappingRow[]>(() => parseMappingJSON(raw))
+
+  useEffect(() => {
+    const persisted = parseMappingJSON(raw)
+    setRows((current) => {
+      const hasIncomplete = current.some((row) => !row.from.trim() || !row.to.trim())
+      return hasIncomplete ? current : persisted
+    })
+  }, [raw])
+
+  function update(next: MappingRow[]) {
+    setRows(next)
+    onChange(serializeMappingJSON(next))
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <Label>模型映射（客户端 → 上游）</Label>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => setRows((current) => [...current, { from: "", to: "" }])}
+        >
+          <Plus className="size-3.5" />
+          添加
+        </Button>
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">无映射。添加一条客户端模型到当前上游实际模型名的映射。</p>
+      ) : (
+        <div className="space-y-2">
+          {rows.map((row, index) => (
+            <div key={index} className="flex items-center gap-2">
+              <Input
+                placeholder="客户端模型"
+                value={row.from}
+                onChange={(event) => {
+                  const next = [...rows]
+                  next[index] = { ...next[index], from: event.target.value }
+                  update(next)
+                }}
+              />
+              <span className="shrink-0 text-muted-foreground">→</span>
+              <Input
+                placeholder="该上游的模型名"
+                value={row.to}
+                onChange={(event) => {
+                  const next = [...rows]
+                  next[index] = { ...next[index], to: event.target.value }
+                  update(next)
+                }}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => update(rows.filter((_, rowIndex) => rowIndex !== index))}
+              >
+                删除
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 type ModelsPanelProps = {
   busy: boolean
   modelsMode: string
@@ -82,12 +162,14 @@ type ModelsPanelProps = {
   modelItems: GatewayModelListItem[]
   setModelItems: (items: GatewayModelListItem[]) => void
   routeDrafts: Partial<GatewayRoute>[]
+  setRouteDrafts: (routes: Partial<GatewayRoute>[]) => void
   channelNameByID: Map<number, string>
   providerNameByID?: Map<number, string>
   modelTestResults: Record<string, GatewayModelTestResult[]>
   modelTesting: string | null
   onRunModelTestFor: (modelID: string, routeID?: number) => void
   onOpenModelTest: (m: GatewayModelListItem) => void
+  onSaveRoutes: () => Promise<void>
   mappingRows: MappingRow[]
   onMappingRowsChange: (rows: MappingRow[]) => void
   modelSuggestions: string[]
@@ -105,16 +187,27 @@ export function ModelsPanel({
   modelItems,
   setModelItems,
   routeDrafts,
+  setRouteDrafts,
   channelNameByID,
   providerNameByID,
   modelTestResults,
   modelTesting,
   onRunModelTestFor,
   onOpenModelTest,
+  onSaveRoutes,
   mappingRows,
   onMappingRowsChange,
   modelSuggestions,
 }: ModelsPanelProps) {
+  function routeLabel(route: Partial<GatewayRoute>) {
+    if (route.source_kind === "provider") {
+      const provider = providerNameByID?.get(Number(route.gateway_provider_id))
+      return provider || `直连 #${route.gateway_provider_id || "—"}`
+    }
+    const channel = channelNameByID.get(Number(route.source_channel_id))
+    return channel || `监控渠道 #${route.source_channel_id || "—"}`
+  }
+
   return (
     <div className="space-y-4">
 <Card className="overflow-hidden border-border shadow-none">
@@ -373,6 +466,44 @@ export function ModelsPanel({
           • 添加自定义模型后，无需再同步，即可在「渠道-分组」列看到全部渠道并直接测试
         </li>
       </ul>
+    </div>
+
+    <div className="space-y-3 border-t border-border pt-5">
+      <div className="space-y-1">
+        <Label>路由映射（按上游）</Label>
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          每条路由独立保存客户端模型到该上游模型的映射。同一客户端模型可在不同路由重复使用。
+        </p>
+      </div>
+      {routeDrafts.length === 0 ? (
+        <p className="text-sm text-muted-foreground">请先在“渠道路由”中添加路由。</p>
+      ) : (
+        <div className="space-y-3">
+          {routeDrafts.map((route, index) => (
+            <div key={route.id ?? `new-route-${index}`} className="rounded-md border border-border p-3">
+              <p className="mb-3 text-sm font-medium text-foreground">{routeLabel(route)}</p>
+              <RouteMappingEditor
+                raw={route.model_mapping}
+                onChange={(value) => {
+                  const next = [...routeDrafts]
+                  if (!next[index]) return
+                  next[index] = { ...next[index], model_mapping: value }
+                  setRouteDrafts(next)
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          disabled={busy || routeDrafts.length === 0}
+          onClick={() => void onSaveRoutes()}
+        >
+          保存路由映射
+        </Button>
+      </div>
     </div>
 
     <ModelMappingEditor

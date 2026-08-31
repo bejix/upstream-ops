@@ -216,6 +216,8 @@ export function ChannelSubscriptionUsageMetricTiles({ channel }: { channel: Chan
   const usageText = !supported || !enabled ? "—" : loading && !usage ? "加载中" : lowest ? `${decimal(lowest.remaining_percent, 0)}%` : "不限"
   const hasSubscriptions = items.length > 0
 
+  if (!enabled || (!loading && !hasSubscriptions)) return null
+
   return (
     <>
       <div className="col-span-2 flex h-16 min-w-0 flex-col justify-between rounded-md border border-border bg-muted/20 px-2.5 py-2">
@@ -251,7 +253,7 @@ export function ChannelSubscriptionUsageMetricTiles({ channel }: { channel: Chan
           ) : (
             <>
               <span className="col-span-3 truncate text-[10px] text-muted-foreground">
-                {enabled && !loading && !hasSubscriptions ? "未订阅" : enabled ? `订阅用量 ${usageText}` : "订阅用量未启用"}
+                {`订阅用量 ${usageText}`}
               </span>
               <Button
                 type="button"

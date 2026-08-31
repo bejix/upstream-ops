@@ -15,6 +15,13 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useConfirm } from "@/components/ui/confirm-dialog"
 import { apiFetch } from "@/lib/api"
@@ -98,6 +105,8 @@ export function GatewayPage() {
   const [mainTab, setMainTab] = useState<MainTab>("gateway")
   const [configTab, setConfigTab] = useState<ConfigTab>("keys")
   const [loading, setLoading] = useState(false)
+  const [autoRefreshInterval, setAutoRefreshInterval] = useState("manual")
+  const refreshInFlightRef = useRef(false)
   const [busy, setBusy] = useState(false)
   /** 切换网关组时右侧配置区 loading */
   const [groupLoading, setGroupLoading] = useState(false)
@@ -613,6 +622,8 @@ export function GatewayPage() {
 
   /** 顶部刷新：组列表 + 当前组密钥/路由/配置 + 直连选项 + 价格 + 使用记录 */
   const refreshAll = useCallback(async () => {
+    if (refreshInFlightRef.current) return
+    refreshInFlightRef.current = true
     setLoading(true)
     try {
       const [items] = await Promise.all([
@@ -661,6 +672,7 @@ export function GatewayPage() {
       toast.error(e instanceof Error ? e.message : "刷新失败")
     } finally {
       setLoading(false)
+      refreshInFlightRef.current = false
     }
   }, [
     fetchGroups,
@@ -675,6 +687,15 @@ export function GatewayPage() {
     usagePageSize,
     usageQueryOpts,
   ])
+
+  useEffect(() => {
+    const delay = Number(autoRefreshInterval)
+    if (!Number.isFinite(delay) || delay <= 0) return
+    const intervalID = window.setInterval(() => {
+      void refreshAll()
+    }, delay)
+    return () => window.clearInterval(intervalID)
+  }, [autoRefreshInterval, refreshAll])
 
   function goUsagePage(p: number) {
     const pages = Math.max(1, usage?.pages ?? 1)
@@ -1445,10 +1466,24 @@ export function GatewayPage() {
               组 · 密钥 · 路由
             </Badge>
           </div>
-          <Button variant="outline" size="sm" onClick={() => void refreshAll()} disabled={loading}>
-            <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
-            刷新
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => void refreshAll()} disabled={loading}>
+              <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+              刷新
+            </Button>
+            <Select value={autoRefreshInterval} onValueChange={setAutoRefreshInterval}>
+              <SelectTrigger size="sm" className="h-8 w-28 text-xs" aria-label="自动刷新间隔">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectItem value="manual">手动</SelectItem>
+                <SelectItem value="5000">5 秒</SelectItem>
+                <SelectItem value="10000">10 秒</SelectItem>
+                <SelectItem value="30000">30 秒</SelectItem>
+                <SelectItem value="60000">60 秒</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
         <div className="max-w-3xl space-y-1.5 text-sm leading-6 text-muted-foreground">
           <p>
@@ -1644,12 +1679,14 @@ export function GatewayPage() {
                         modelItems={modelItems}
                         setModelItems={setModelItems}
                         routeDrafts={routeDrafts}
+                        setRouteDrafts={setRouteDrafts}
                         channelNameByID={channelNameByID}
                         providerNameByID={providerNameByID}
                         modelTestResults={modelTestResults}
                         modelTesting={modelTesting}
                         onRunModelTestFor={(id, rid) => void runModelTestFor(id, rid)}
                         onOpenModelTest={openModelTest}
+                        onSaveRoutes={saveRoutes}
                         mappingRows={mappingRows}
                         onMappingRowsChange={setMappingRows}
                         modelSuggestions={modelSuggestions}
