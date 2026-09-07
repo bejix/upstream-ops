@@ -139,12 +139,15 @@ func TestLoginNewAPIMissingUserFails(t *testing.T) {
 // 成功响应返回新的 access_token，并通过 Set-Cookie 轮换 refresh token。
 func TestRefreshSessionPostsRefreshCookie(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/user/auth/refresh", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/newapi/api/user/auth/refresh", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want POST", r.Method)
 		}
 		if got := r.Header.Get("Authorization"); got != "" {
 			t.Fatalf("refresh must not send Authorization, got %q", got)
+		}
+		if got := r.Header.Get("Origin"); got != "http://"+r.Host {
+			t.Fatalf("origin = %q, want %q", got, "http://"+r.Host)
 		}
 		cookie := r.Header.Get("Cookie")
 		if !strings.Contains(cookie, "new_api_refresh=old-refresh") {
@@ -164,7 +167,7 @@ func TestRefreshSessionPostsRefreshCookie(t *testing.T) {
 		RefreshToken: "old-refresh",
 		ExpiresAt:    time.Now().Add(1 * time.Minute),
 	}
-	refreshed, err := c.RefreshSession(context.Background(), &connector.Channel{SiteURL: srv.URL}, old)
+	refreshed, err := c.RefreshSession(context.Background(), &connector.Channel{SiteURL: srv.URL + "/newapi/"}, old)
 	if err != nil {
 		t.Fatalf("RefreshSession: %v", err)
 	}
@@ -187,6 +190,54 @@ func TestRefreshSessionPostsRefreshCookie(t *testing.T) {
 	// 入参 session 不应被原地修改（防止共享 session 被破坏）。
 	if old.AccessToken != "stale-jwt" || old.RefreshToken != "old-refresh" {
 		t.Fatalf("input session mutated: %#v", old)
+	}
+}
+
+func TestRefreshSessionFallbackPolicy(t *testing.T) {
+	tests := []struct {
+		name          string
+		status        int
+		allowFallback bool
+	}{
+		{name: "unauthorized", status: http.StatusUnauthorized, allowFallback: true},
+		{name: "origin forbidden", status: http.StatusForbidden, allowFallback: false},
+		{name: "refresh race", status: http.StatusConflict, allowFallback: false},
+		{name: "rate limited", status: http.StatusTooManyRequests, allowFallback: false},
+		{name: "server error", status: http.StatusInternalServerError, allowFallback: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(`{"success":false,"code":"refresh_failed","message":"refresh failed"}`))
+			}))
+			defer srv.Close()
+
+			_, err := New().RefreshSession(context.Background(), &connector.Channel{SiteURL: srv.URL}, &connector.AuthSession{
+				UserID:       "9",
+				RefreshToken: "refresh",
+			})
+			if err == nil {
+				t.Fatal("RefreshSession succeeded, want error")
+			}
+			if got := connector.ShouldLoginAfterRefreshError(err); got != tt.allowFallback {
+				t.Fatalf("ShouldLoginAfterRefreshError() = %v, want %v; err = %v", got, tt.allowFallback, err)
+			}
+		})
+	}
+}
+
+func TestRefreshSessionRejectsInvalidSiteURL(t *testing.T) {
+	_, err := New().RefreshSession(context.Background(), &connector.Channel{SiteURL: "ftp://example.com/path"}, &connector.AuthSession{
+		UserID:       "9",
+		RefreshToken: "refresh",
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid NewAPI site URL") {
+		t.Fatalf("err = %v, want invalid NewAPI site URL", err)
+	}
+	if connector.ShouldLoginAfterRefreshError(err) {
+		t.Fatal("invalid site URL must not permit password login fallback")
 	}
 }
 

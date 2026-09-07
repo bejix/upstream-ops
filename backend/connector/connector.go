@@ -11,12 +11,41 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
 	"sync"
 	"time"
 )
+
+// SessionRefreshError records whether a refresh failure is safe to recover from
+// by creating a new password login session.
+type SessionRefreshError struct {
+	Err                error
+	AllowLoginFallback bool
+}
+
+func (e *SessionRefreshError) Error() string { return e.Err.Error() }
+func (e *SessionRefreshError) Unwrap() error { return e.Err }
+
+func WrapSessionRefreshError(err error, allowLoginFallback bool) error {
+	if err == nil {
+		return nil
+	}
+	return &SessionRefreshError{Err: err, AllowLoginFallback: allowLoginFallback}
+}
+
+// ShouldLoginAfterRefreshError preserves legacy fallback for connectors that
+// do not classify their refresh failures, while allowing strict connectors to
+// protect upstream session quotas.
+func ShouldLoginAfterRefreshError(err error) bool {
+	var refreshErr *SessionRefreshError
+	if !errors.As(err, &refreshErr) {
+		return true
+	}
+	return refreshErr.AllowLoginFallback
+}
 
 // ChannelType 渠道类型枚举，与 storage.ChannelType 同步。
 type ChannelType string

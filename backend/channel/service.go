@@ -38,6 +38,7 @@ type Service struct {
 	mu          sync.RWMutex
 	proxyConfig config.ProxyConfig
 	upstream    config.UpstreamConfig
+	locks       sync.Map
 
 	// apiKeyGroupSetCache 缓存"已创建密钥的分组集合"。
 	// 该集合需要分页拉取上游全部密钥计算，monitor 每次刷新和前端切页都会用到，
@@ -642,6 +643,10 @@ func (s *Service) EnsureSession(
 	resolved *connector.Channel,
 	conn connector.Connector,
 ) (*connector.AuthSession, error) {
+	lock := s.sessionLock(c.ID)
+	lock.Lock()
+	defer lock.Unlock()
+
 	if c.CredentialMode == storage.CredentialModeToken {
 		progress.Start(ctx, progress.StageSession, "使用用户提供的 token…")
 		session, err := s.buildSessionFromToken(c)
@@ -696,6 +701,11 @@ func (s *Service) EnsureSession(
 	return s.login(ctx, c, resolved, conn)
 }
 
+func (s *Service) sessionLock(channelID uint) *sync.Mutex {
+	lock, _ := s.locks.LoadOrStore(channelID, &sync.Mutex{})
+	return lock.(*sync.Mutex)
+}
+
 func (s *Service) refreshStoredSession(
 	ctx context.Context,
 	c *storage.Channel,
@@ -709,6 +719,11 @@ func (s *Service) refreshStoredSession(
 	progress.Start(ctx, progress.StageSession, "使用 refresh_token 刷新会话…")
 	refreshed, err := refreshSession(ctx, resolved, conn, session)
 	if err != nil {
+		if !connector.ShouldLoginAfterRefreshError(err) {
+			progress.Fail(ctx, progress.StageSession, err.Error())
+			_ = s.Channels.SetLastError(c.ID, err.Error())
+			return nil, false, err
+		}
 		progress.OK(ctx, progress.StageSession, "刷新失败，重新登录")
 		return nil, false, nil
 	}
