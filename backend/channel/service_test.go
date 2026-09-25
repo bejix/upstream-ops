@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -396,4 +398,159 @@ func TestTestLoginFailsWhenSessionAuthFails(t *testing.T) {
 	if saved != nil {
 		t.Fatalf("saved session = %#v, want nil", saved)
 	}
+}
+
+func TestEnsureSessionNewAPIRefreshFailureDoesNotLogin(t *testing.T) {
+	var loginCalls atomic.Int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/user/auth/refresh", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"success":false,"code":"AUTH_ORIGIN_FORBIDDEN","message":"Forbidden"}`, http.StatusForbidden)
+	})
+	mux.HandleFunc("/api/user/login", func(w http.ResponseWriter, r *http.Request) {
+		loginCalls.Add(1)
+		http.Error(w, "unexpected login", http.StatusInternalServerError)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	svc, ch, resolved, conn := newStoredNewAPIChannel(t, srv.URL)
+	_, err := svc.EnsureSession(context.Background(), ch, resolved, conn)
+	if err == nil || !strings.Contains(err.Error(), "status 403") {
+		t.Fatalf("EnsureSession error = %v, want refresh status 403", err)
+	}
+	if got := loginCalls.Load(); got != 0 {
+		t.Fatalf("login calls = %d, want 0", got)
+	}
+	if saved, findErr := svc.AuthSessions.FindByChannel(ch.ID); findErr != nil || saved == nil {
+		t.Fatalf("stored session after refresh failure = %#v, err = %v; want preserved", saved, findErr)
+	}
+}
+
+func TestEnsureSessionNewAPIUnauthorizedRefreshRelogsIn(t *testing.T) {
+	var loginCalls atomic.Int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/user/auth/refresh", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"success":false,"code":"AUTH_UNAUTHORIZED","message":"Unauthorized"}`, http.StatusUnauthorized)
+	})
+	mux.HandleFunc("/api/user/login", func(w http.ResponseWriter, r *http.Request) {
+		loginCalls.Add(1)
+		http.SetCookie(w, &http.Cookie{Name: "new_api_refresh", Value: "new-refresh"})
+		_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"access_token":"new-access","access_expires_at":1900000000,"user":{"id":9}}}`))
+	})
+	mux.HandleFunc("/api/user/self", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"id":9}}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	svc, ch, resolved, conn := newStoredNewAPIChannel(t, srv.URL)
+	session, err := svc.EnsureSession(context.Background(), ch, resolved, conn)
+	if err != nil {
+		t.Fatalf("EnsureSession: %v", err)
+	}
+	if got := loginCalls.Load(); got != 1 {
+		t.Fatalf("login calls = %d, want 1", got)
+	}
+	if session.AccessToken != "new-access" || session.RefreshToken != "new-refresh" {
+		t.Fatalf("session = %#v", session)
+	}
+}
+
+func TestEnsureSessionSerializesRefreshByChannel(t *testing.T) {
+	var refreshCalls atomic.Int32
+	firstRefreshStarted := make(chan struct{})
+	secondRefreshStarted := make(chan struct{})
+	releaseRefresh := make(chan struct{})
+	var firstOnce sync.Once
+	var secondOnce sync.Once
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/user/auth/refresh", func(w http.ResponseWriter, r *http.Request) {
+		call := refreshCalls.Add(1)
+		if call == 1 {
+			firstOnce.Do(func() { close(firstRefreshStarted) })
+		} else {
+			secondOnce.Do(func() { close(secondRefreshStarted) })
+		}
+		<-releaseRefresh
+		http.SetCookie(w, &http.Cookie{Name: "new_api_refresh", Value: "rotated-refresh"})
+		_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"access_token":"rotated-access","access_expires_at":1900000000,"user":{"id":9}}}`))
+	})
+	mux.HandleFunc("/api/user/self", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"id":9}}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	svc, ch, resolved, conn := newStoredNewAPIChannel(t, srv.URL)
+	type result struct {
+		session *connector.AuthSession
+		err     error
+	}
+	results := make(chan result, 2)
+	go func() {
+		session, err := svc.EnsureSession(context.Background(), ch, resolved, conn)
+		results <- result{session: session, err: err}
+	}()
+	<-firstRefreshStarted
+	go func() {
+		session, err := svc.EnsureSession(context.Background(), ch, resolved, conn)
+		results <- result{session: session, err: err}
+	}()
+
+	select {
+	case <-secondRefreshStarted:
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseRefresh)
+
+	for range 2 {
+		result := <-results
+		if result.err != nil {
+			t.Fatalf("EnsureSession: %v", result.err)
+		}
+		if result.session.AccessToken != "rotated-access" {
+			t.Fatalf("access token = %q, want rotated-access", result.session.AccessToken)
+		}
+	}
+	if got := refreshCalls.Load(); got != 1 {
+		t.Fatalf("refresh calls = %d, want 1", got)
+	}
+}
+
+func newStoredNewAPIChannel(t *testing.T, siteURL string) (*Service, *storage.Channel, *connector.Channel, connector.Connector) {
+	t.Helper()
+	svc, cipher := testService(t)
+	passwordCipher, err := cipher.Encrypt("password")
+	if err != nil {
+		t.Fatalf("encrypt password: %v", err)
+	}
+	ch := &storage.Channel{
+		Name:           "newapi-session-refresh",
+		Type:           storage.ChannelTypeNewAPI,
+		SiteURL:        siteURL,
+		Username:       "user",
+		PasswordCipher: passwordCipher,
+		CredentialMode: storage.CredentialModePassword,
+	}
+	if err := svc.Channels.Create(ch); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if err := svc.persistSession(ch.ID, &connector.AuthSession{
+		UserID:       "9",
+		AccessToken:  "old-access",
+		RefreshToken: "old-refresh",
+		ExpiresAt:    time.Now().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("persist session: %v", err)
+	}
+	resolved, err := svc.Resolve(context.Background(), ch)
+	if err != nil {
+		t.Fatalf("resolve channel: %v", err)
+	}
+	conn, err := connector.For(connector.TypeNewAPI)
+	if err != nil {
+		t.Fatalf("new NewAPI connector: %v", err)
+	}
+	return svc, ch, resolved, conn
 }
