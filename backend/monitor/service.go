@@ -132,7 +132,8 @@ func (s *Service) RefreshBalance(ctx context.Context, c *storage.Channel) error 
 		s.notifyError(ctx, c, storage.EventMonitorFailed, "消费采集失败", err)
 		return err
 	}
-	if err := s.channels.UpdateCosts(c.ID, costRes.TodayCost, costRes.TotalCost); err != nil {
+	costAt := time.Now()
+	if err := s.channels.UpdateCosts(c.ID, costRes.TodayCost, costRes.TotalCost, costAt); err != nil {
 		progress.Fail(ctx, progress.StageCost, err.Error())
 		return err
 	}

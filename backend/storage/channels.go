@@ -2,7 +2,7 @@ package storage
 
 import (
 	"errors"
-	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -40,7 +40,7 @@ func (r *Channels) Delete(id uint) error {
 			return err
 		}
 		if channel.Name != "" {
-			pattern := "%" + strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(channel.Name) + "%"
+			pattern := "%" + likeEscaper.Replace(channel.Name) + "%"
 			if err := tx.Where("upstream_channel_id = 0 AND (subject LIKE ? ESCAPE '!' OR body LIKE ? ESCAPE '!')", pattern, pattern).
 				Delete(&NotificationLog{}).Error; err != nil {
 				return err
@@ -63,19 +63,37 @@ func (r *Channels) List() ([]Channel, error) {
 	}
 	return list, nil
 }
-func (r *Channels) ListPage(page, pageSize int) ([]Channel, int64, error) {
+
+// ListPage 按 filter 搜索、筛选、排序后分页，pageSize 为 -1 时返回全部。
+// total 是筛选后的总数；filter 含未知取值时返回错误（见 ChannelListFilter.Normalize）。
+//
+// 按名称 / 账号排序时，SQL 只负责筛选，排序和分页在内存里做（见 sortChannelsByText）。
+// 渠道数量有限，一次读出全部匹配行的开销可以接受。
+func (r *Channels) ListPage(page, pageSize int, filter ChannelListFilter) ([]Channel, int64, error) {
+	filter, err := filter.Normalize()
+	if err != nil {
+		return nil, 0, err
+	}
 	if page < 1 {
 		page = 1
 	}
 	if pageSize <= 0 && pageSize != -1 {
 		pageSize = 20
 	}
+	if filter.sortsChannelsInMemory() {
+		var all []Channel
+		if err := applyChannelListFilter(r.db.Model(&Channel{}), filter).Find(&all).Error; err != nil {
+			return nil, 0, err
+		}
+		sortChannelsByText(all, filter)
+		return pageChannels(all, page, pageSize), int64(len(all)), nil
+	}
 	var total int64
-	if err := r.db.Model(&Channel{}).Count(&total).Error; err != nil {
+	if err := applyChannelListFilter(r.db.Model(&Channel{}), filter).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var list []Channel
-	q := r.db.Order("sort_order DESC").Order("id ASC")
+	q := applyChannelListOrder(applyChannelListFilter(r.db.Model(&Channel{}), filter), filter)
 	if pageSize != -1 {
 		q = q.Offset((page - 1) * pageSize).Limit(pageSize)
 	}
@@ -99,10 +117,12 @@ func (r *Channels) UpdateBalance(id uint, balance float64, at any, lastErr strin
 	}).Error
 }
 
-func (r *Channels) UpdateCosts(id uint, todayCost float64, totalCost float64) error {
+// UpdateCosts 写入最近一次消费采集结果；at 为采集时间，用于"今日消费"跨天判断。
+func (r *Channels) UpdateCosts(id uint, todayCost float64, totalCost float64, at time.Time) error {
 	return r.db.Model(&Channel{}).Where("id = ?", id).Updates(map[string]any{
-		"today_cost": todayCost,
-		"total_cost": totalCost,
+		"today_cost":    todayCost,
+		"today_cost_at": at,
+		"total_cost":    totalCost,
 	}).Error
 }
 func (r *Channels) SetLastError(id uint, msg string) error {

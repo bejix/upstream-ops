@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bejix/upstream-ops/backend/channel"
 	"github.com/bejix/upstream-ops/backend/connector"
@@ -68,6 +69,8 @@ type channelInput struct {
 	RechargeMultiplierMode string                 `json:"recharge_multiplier_mode"`
 	MonitorEnabled         bool                   `json:"monitor_enabled"`
 	OnlyCreatedKeyGroupsEnabled bool             `json:"only_created_key_groups_enabled"`
+	Tags                   []string               `json:"tags"`
+	Notes                  string                 `json:"notes"`
 }
 
 type channelUpdateInput struct {
@@ -89,6 +92,8 @@ type channelUpdateInput struct {
 	RechargeMultiplierMode *string                 `json:"recharge_multiplier_mode"`
 	MonitorEnabled         *bool                   `json:"monitor_enabled"`
 	OnlyCreatedKeyGroupsEnabled *bool             `json:"only_created_key_groups_enabled"`
+	Tags                   *[]string               `json:"tags"` // 省略或 null 表示不修改，[] 表示清空
+	Notes                  *string                 `json:"notes"`
 }
 
 type channelOutput struct {
@@ -122,7 +127,12 @@ func listChannels(c *gin.Context, d *Deps) {
 			fail(c, http.StatusBadRequest, err)
 			return
 		}
-		list, total, err := d.Channels.ListPage(page, pageSize)
+		filter, err := parseChannelListFilter(c)
+		if err != nil {
+			fail(c, http.StatusBadRequest, err)
+			return
+		}
+		list, total, err := d.Channels.ListPage(page, pageSize, filter)
 		if err != nil {
 			fail(c, http.StatusInternalServerError, err)
 			return
@@ -155,6 +165,16 @@ func createChannel(c *gin.Context, d *Deps) {
 		fail(c, http.StatusBadRequest, err)
 		return
 	}
+	tags, err := normalizeChannelTagsInput(in.Tags)
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	notes, err := normalizeChannelNotesInput(in.Notes)
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
 	created, err := d.ChannelSvc.Create(channel.CreateInput{
 		Name:                   in.Name,
 		Type:                   in.Type,
@@ -175,6 +195,8 @@ func createChannel(c *gin.Context, d *Deps) {
 		RechargeMultiplierMode: in.RechargeMultiplierMode,
 		MonitorEnabled:         in.MonitorEnabled,
 		OnlyCreatedKeyGroupsEnabled: in.OnlyCreatedKeyGroupsEnabled,
+		Tags:                   tags,
+		Notes:                  notes,
 	})
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
@@ -183,16 +205,49 @@ func createChannel(c *gin.Context, d *Deps) {
 	c.JSON(http.StatusOK, gin.H{"data": channelOutputFor(d, *created)})
 }
 
+// normalizeChannelTagsInput 规范化并校验渠道标签（个数 / 单个长度按规范化后的结果计算）。
+func normalizeChannelTagsInput(tags []string) ([]string, error) {
+	tags = storage.NormalizeChannelTags(tags)
+	if len(tags) > storage.MaxChannelTags {
+		return nil, fmt.Errorf("标签最多 %d 个", storage.MaxChannelTags)
+	}
+	for _, tag := range tags {
+		if utf8.RuneCountInString(tag) > storage.MaxChannelTagRunes {
+			return nil, fmt.Errorf("单个标签最多 %d 个字符：%s", storage.MaxChannelTagRunes, tag)
+		}
+	}
+	return tags, nil
+}
+
+// normalizeChannelNotesInput 去掉首尾空白后校验备注长度。
+func normalizeChannelNotesInput(notes string) (string, error) {
+	notes = strings.TrimSpace(notes)
+	if utf8.RuneCountInString(notes) > storage.MaxChannelNotesRunes {
+		return "", fmt.Errorf("备注最多 %d 个字符", storage.MaxChannelNotesRunes)
+	}
+	return notes, nil
+}
+
+// costNow 输出层判断"今日消费"是否跨天使用的当前时间，测试可替换。
+var costNow = time.Now
+
 func channelOutputs(d *Deps, list []storage.Channel) []channelOutput {
+	now := costNow()
 	out := make([]channelOutput, 0, len(list))
 	for _, ch := range list {
-		out = append(out, channelOutputFor(d, ch))
+		out = append(out, channelOutputAt(d, ch, now))
 	}
 	return out
 }
 
 func channelOutputFor(d *Deps, ch storage.Channel) channelOutput {
+	return channelOutputAt(d, ch, costNow())
+}
+
+// channelOutputAt 组装渠道输出；TodayCost 按 now 做跨天归零（只影响响应，不回写数据库）。
+func channelOutputAt(d *Deps, ch storage.Channel, now time.Time) channelOutput {
 	out := channelOutput{Channel: ch}
+	out.TodayCost = ch.EffectiveTodayCost(now)
 	out.UserID = channelUserID(d, &ch)
 	return out
 }
@@ -246,6 +301,24 @@ func updateChannel(c *gin.Context, d *Deps) {
 		fail(c, http.StatusBadRequest, err)
 		return
 	}
+	var tags *[]string
+	if in.Tags != nil {
+		normalized, err := normalizeChannelTagsInput(*in.Tags)
+		if err != nil {
+			fail(c, http.StatusBadRequest, err)
+			return
+		}
+		tags = &normalized
+	}
+	var notes *string
+	if in.Notes != nil {
+		normalized, err := normalizeChannelNotesInput(*in.Notes)
+		if err != nil {
+			fail(c, http.StatusBadRequest, err)
+			return
+		}
+		notes = &normalized
+	}
 	subscriptionEnabled := in.SubscriptionEnabled
 	if subscriptionEnabled != nil {
 		current, err := d.Channels.FindByID(id)
@@ -275,6 +348,8 @@ func updateChannel(c *gin.Context, d *Deps) {
 		RechargeMultiplierMode: in.RechargeMultiplierMode,
 		MonitorEnabled:         in.MonitorEnabled,
 		OnlyCreatedKeyGroupsEnabled: in.OnlyCreatedKeyGroupsEnabled,
+		Tags:                   tags,
+		Notes:                  notes,
 	})
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
@@ -728,6 +803,18 @@ func parseChannelPageQuery(c *gin.Context) (int, int, error) {
 		pageSize = 100
 	}
 	return page, pageSize, nil
+}
+
+// parseChannelListFilter 解析分页列表的 q / status / tag / sort / order 参数，
+// 未知的 status / sort / order 或超长的 q / tag 返回错误（由调用方转成 400）。
+func parseChannelListFilter(c *gin.Context) (storage.ChannelListFilter, error) {
+	return storage.ChannelListFilter{
+		Query:  c.Query("q"),
+		Status: c.Query("status"),
+		Tag:    c.Query("tag"),
+		Sort:   c.Query("sort"),
+		Order:  c.Query("order"),
+	}.Normalize()
 }
 
 // setupSSE 给 ResponseWriter 设上 text/event-stream 头，返回一个就绪的 sseObserver。

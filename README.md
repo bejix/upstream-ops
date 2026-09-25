@@ -99,12 +99,16 @@ UpstreamOps focuses on these problems:
 - Supports Cloudflare Turnstile solving for upstream login flows.
 - Opens upstream site URLs directly from channel cards.
 - Supports clearing saved login information from channel cards.
+- Searches channels by name, username, site URL, notes, or tags; filters by status (healthy / low balance / login failed / not yet synced / paused) or tag; sorts by name, username (Chinese by pinyin), health, or balance.
+- Supports custom tags and notes per channel; tags can be used directly as filters.
+- Channel cards show the login username; the channel list remembers the per-page size in the browser across reloads.
 - Supports a "only show groups with created keys" toggle: when enabled, channel cards, group dialogs, rate panels, and rate-change notifications only cover groups that already have API keys; gateway forwarding and notification settings still see all groups, and local rate snapshots always keep the full set.
 - Deleting a channel cleans related snapshots, rates, announcements, notification cooldowns, and notification logs.
 
 ### Balance and Spending Monitoring
 
 - Shows total balance, today spending, total spending, lowest-balance channel, and abnormal channel count.
+- Today spending rolls over at midnight Beijing time: if a channel has no spending sample for the current day (for example, monitoring is paused), its today spending shows 0.
 - Periodically collects balance and spending data.
 - Displays balance history trends.
 - Pushes notifications when balance falls below the configured threshold.
@@ -302,7 +306,7 @@ IMAGE_TAG=latest
 For production, pin a specific version:
 
 ```env
-IMAGE_TAG=v0.0.9
+IMAGE_TAG=v0.0.10
 ```
 
 ## MySQL Deployment
@@ -480,6 +484,8 @@ Username/password mode:
 - If Turnstile is enabled, configure a captcha provider first, then enable Turnstile in the channel.
 
 Newer NewAPI builds (QuantumNous/new-api and forks) issue short-lived `access_token` Bearer JWTs (default 15 minutes) at login and return a `new_api_refresh` refresh token. UpstreamOps automatically calls `/api/user/auth/refresh` to renew the access token and rotate the refresh token before it expires, so frequent re-login is not needed. Older NewAPI builds still authenticate via `Set-Cookie: session=...` plus the `New-Api-User` header; the connector auto-detects and supports both.
+
+Login and refresh requests send `Origin` / `Referer` derived from the site URL. Only an explicit 401 (refresh token invalid) falls back to password login; other failures such as 403, 409, 429, 5xx, or network errors keep the stored session and record the error, so repeated logins cannot exhaust the upstream session limit. Session refresh and login are serialized per channel.
 
 Token/cookie mode:
 
@@ -975,8 +981,21 @@ Channels:
 ```text
 GET /api/channels?page=1&page_size=20
 GET /api/channels?page=1&page_size=-1
+GET /api/channels?page=1&page_size=20&q=vip&status=healthy&tag=backup&sort=balance&order=desc
 POST /api/channels/:id/clear-login-info
 ```
+
+Paged mode (with `page` / `page_size`) accepts these optional parameters; the unpaged full list ignores them:
+
+- `q`: substring search over name, username, site URL, notes, and tags (ASCII case-insensitive), up to 200 characters.
+- `status`: `healthy`, `low`, `failed`, `idle` (not yet synced), or `paused`.
+- `tag`: exact match on a single tag (ASCII case-insensitive), no commas, up to 32 characters.
+- `sort`: `default` (channel sort order), `name`, `username`, `health`, or `balance`; name and username put digits and symbols first, then Chinese by pinyin, then letters (case-insensitive), matching the browser's `zh-CN` order (a few polyphonic characters may differ); blank usernames and channels without a balance always come last.
+- `order`: `asc` (default) or `desc`; ignored for `sort=default`.
+
+Invalid or over-long values return 400; `total` / `pages` reflect the filtered result.
+
+On MySQL, `q` / `tag` matching follows the database collation: the MySQL 8 default `utf8mb4_0900_ai_ci` also ignores accents, non-ASCII letter case, and full-width / half-width differences (for example, `tag=Ärger` also matches `ärger`, and `tag=vip` also matches `ＶＩＰ`).
 
 Recharge:
 

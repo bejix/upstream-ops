@@ -166,6 +166,8 @@ type CreateInput struct {
 	RechargeMultiplierMode string
 	MonitorEnabled         bool
 	OnlyCreatedKeyGroupsEnabled bool
+	Tags                   []string
+	Notes                  string
 }
 
 func (s *Service) Create(in CreateInput) (*storage.Channel, error) {
@@ -208,6 +210,8 @@ func (s *Service) Create(in CreateInput) (*storage.Channel, error) {
 		RechargeMultiplierMode: connector.NormalizeRechargeMultiplierMode(in.RechargeMultiplierMode),
 		MonitorEnabled:         in.MonitorEnabled,
 		OnlyCreatedKeyGroupsEnabled: in.OnlyCreatedKeyGroupsEnabled,
+		Tags:                   storage.NormalizeChannelTags(in.Tags),
+		Notes:                  strings.TrimSpace(in.Notes),
 	}
 	if mode == storage.CredentialModeToken {
 		// token 模式不依赖打码 provider
@@ -239,6 +243,8 @@ type UpdateInput struct {
 	RechargeMultiplierMode *string
 	MonitorEnabled         *bool
 	OnlyCreatedKeyGroupsEnabled *bool
+	Tags                   *[]string // nil 表示不修改；空切片表示清空
+	Notes                  *string
 }
 
 func (s *Service) Update(id uint, in UpdateInput) (*storage.Channel, error) {
@@ -352,6 +358,12 @@ func (s *Service) Update(id uint, in UpdateInput) (*storage.Channel, error) {
 	}
 	if in.OnlyCreatedKeyGroupsEnabled != nil {
 		c.OnlyCreatedKeyGroupsEnabled = *in.OnlyCreatedKeyGroupsEnabled
+	}
+	if in.Tags != nil {
+		c.Tags = storage.NormalizeChannelTags(*in.Tags)
+	}
+	if in.Notes != nil {
+		c.Notes = strings.TrimSpace(*in.Notes)
 	}
 	if err := s.Channels.Update(c); err != nil {
 		return nil, err

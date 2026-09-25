@@ -61,10 +61,16 @@ type Channel struct {
 	// 等仍可拿到原始全部分组。
 	OnlyCreatedKeyGroupsEnabled bool `gorm:"default:false" json:"only_created_key_groups_enabled"`
 
+	// 用户自定义的标签与备注，仅用于展示与筛选，不参与监控逻辑。
+	// Tags 的存储格式见 ChannelTags。
+	Tags  ChannelTags `gorm:"size:1024;not null;default:''" json:"tags"`
+	Notes string      `gorm:"type:text" json:"notes"`
+
 	// 最近一次采集结果（聚合视图，便于列表页直接展示）
 	LastBalance   *float64   `json:"last_balance,omitempty"`
 	LastBalanceAt *time.Time `json:"last_balance_at,omitempty"`
 	TodayCost     *float64   `json:"today_cost,omitempty"`
+	TodayCostAt   *time.Time `json:"today_cost_at,omitempty"` // 最近一次写入 TodayCost 的时间，用于跨天判断
 	TotalCost     *float64   `json:"total_cost,omitempty"`
 	LastError     string     `gorm:"type:text" json:"last_error,omitempty"`
 
@@ -73,6 +79,31 @@ type Channel struct {
 }
 
 func (Channel) TableName() string { return "channels" }
+
+// EffectiveTodayCost 返回以 now 所在日期为准的"今日消费"。
+//
+// TodayCost 只在监控采集成功时刷新；暂停监控（或采集持续失败）后会一直停留在最后一次
+// 采样的那天。这里比较 TodayCostAt 与 now 的日期：采样日早于今天时返回 0，否则原样返回。
+// TodayCostAt 为空时无法判断，原样返回。
+//
+// 日期按消费趋势统计同一个时区（trendLocation，Asia/Shanghai）划分，与服务器进程的时区
+// 和 now 自带的时区无关，这样"今日消费"归零与趋势图换日发生在同一时刻。
+//
+// 不回退到 LastBalanceAt：余额可以单独刷新（兑换码充值、消费采集失败等），它是今天
+// 并不代表 TodayCost 也是今天采的。升级前的旧数据由 AutoMigrate 一次性回填 TodayCostAt
+// （见 backfillChannelTodayCostAt）。
+//
+// 仅用于 API 输出层，结果不要写回数据库。
+func (c Channel) EffectiveTodayCost(now time.Time) *float64 {
+	if c.TodayCost == nil || c.TodayCostAt == nil {
+		return c.TodayCost
+	}
+	if dayStart(*c.TodayCostAt).Before(dayStart(now)) {
+		zero := 0.0
+		return &zero
+	}
+	return c.TodayCost
+}
 
 // AuthSession 渠道登录后保存的凭据，按 ChannelID 一对一关联。
 // *Cipher 字段都用 AES-GCM 加密；UserID 是上游账号 ID 字符串（非敏感），明文存放。

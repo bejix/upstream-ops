@@ -126,7 +126,8 @@ export function BalanceOverview() {
             </span>
           </span>
         </div>
-        <div className="h-64 min-h-0 w-full sm:h-72 lg:h-auto lg:flex-1">
+        {/* 图表保底 min-h-40：lg 下卡片定高、图表 flex-1 分剩余空间，渠道再多也只压缩下方渠道列表，不会把图表挤成 0 高 */}
+        <div className="h-64 min-h-40 w-full sm:h-72 lg:h-auto lg:flex-1">
           {isLoading ? (
             <div className="flex h-full items-center justify-center text-xs text-muted-foreground">{"加载中…"}</div>
           ) : data.length === 0 ? (
@@ -188,9 +189,9 @@ export function BalanceOverview() {
           )}
         </div>
 
-        {/* per-channel chips */}
+        {/* per-channel chips：最多约 3 行半，超出在列表内滚动；min-h-0 允许空间不足时让位给图表，不会溢出卡片 */}
         {channels.length > 0 ? (
-          <div className="mt-3 flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-t border-border pt-3">
+          <div className="mt-3 flex max-h-24 min-h-0 flex-wrap items-center gap-x-5 gap-y-2 overflow-y-auto overscroll-contain border-t border-border pt-3">
             {channels.map((c) => {
               const isFailed = !!c.last_error
               const isUnknown = c.last_balance == null

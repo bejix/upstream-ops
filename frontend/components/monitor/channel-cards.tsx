@@ -21,9 +21,12 @@ import {
   Search,
   Tags,
   Trash2,
+  UserRound,
   Gift,
   ChevronsLeft,
   ChevronsRight,
+  FunnelX,
+  X,
   XCircle,
 } from "lucide-react"
 import { Card } from "@/components/ui/card"
@@ -53,12 +56,20 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useConfirm } from "@/components/ui/confirm-dialog"
 import { useChannels, useChannelsPage, useChannelRates } from "@/lib/queries"
+import { channelTagKey } from "@/lib/channel-tags"
 import { apiFetch } from "@/lib/api"
 import { useTriggerRefresh } from "@/lib/refresh-context"
 import { channelTypeLabel, decimal, formatRatio, money, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { syncAllChannelsStream, syncChannelStream, testLoginStream, type ProgressEvent } from "@/lib/sync-stream"
-import type { Channel, ChannelRedeemResult, RateSnapshot } from "@/lib/api-types"
+import type {
+  Channel,
+  ChannelListOrder,
+  ChannelListSort,
+  ChannelListStatus,
+  ChannelRedeemResult,
+  RateSnapshot,
+} from "@/lib/api-types"
 import { ChannelFormDialog } from "@/components/monitor/channel-form-dialog"
 import { ChannelRedeemDialog } from "@/components/monitor/channel-redeem-dialog"
 import { ChannelRechargeDialog } from "@/components/monitor/channel-recharge-dialog"
@@ -73,8 +84,41 @@ import {
 type Status = "healthy" | "low" | "failed" | "idle"
 type ChannelPageSize = 9 | 18 | 36 | 72 | 81 | "all"
 type GroupSortMode = "channel-asc" | "channel-desc" | "ratio-asc" | "ratio-desc"
+type ChannelStatusFilter = "all" | ChannelListStatus
+type ChannelSortMode =
+  | "default"
+  | "name-asc"
+  | "name-desc"
+  | "username-asc"
+  | "username-desc"
+  | "health-asc"
+  | "balance-asc"
+  | "balance-desc"
 
 const channelPageSizeOptions: ChannelPageSize[] = [9, 18, 36, 72, 81, "all"]
+// 与后端 storage.MaxChannelListQueryRunes 一致；maxLength 按 UTF-16 计数，不会超过后端按字符计的上限。
+const MAX_CHANNEL_SEARCH_LENGTH = 200
+const DEFAULT_CHANNEL_PAGE_SIZE: ChannelPageSize = 9
+const CHANNEL_PAGE_SIZE_STORAGE_KEY = "monitor-channel-page-size-v1"
+
+/** 读取上次选择的每页数量；不在可选项里的旧值 / 脏值一律回退默认值。 */
+function loadChannelPageSize(): ChannelPageSize {
+  if (typeof window === "undefined") return DEFAULT_CHANNEL_PAGE_SIZE
+  try {
+    const raw = window.localStorage.getItem(CHANNEL_PAGE_SIZE_STORAGE_KEY)
+    return channelPageSizeOptions.find((v) => String(v) === raw) ?? DEFAULT_CHANNEL_PAGE_SIZE
+  } catch {
+    return DEFAULT_CHANNEL_PAGE_SIZE
+  }
+}
+
+function saveChannelPageSize(v: ChannelPageSize) {
+  try {
+    window.localStorage.setItem(CHANNEL_PAGE_SIZE_STORAGE_KEY, String(v))
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
 
 function pageNumbers(currentPage: number, totalPages: number) {
   const first = Math.max(1, currentPage - 3)
@@ -94,6 +138,52 @@ const statusMap: Record<Status, { label: string; cls: string }> = {
   low: { label: "低余额", cls: "text-warning bg-warning/10" },
   failed: { label: "登录失败", cls: "text-danger bg-danger/10" },
   idle: { label: "尚未采集", cls: "text-muted-foreground bg-muted/40" },
+}
+
+/** 状态筛选项；健康状态的判断在后端按 statusOf() 同样的规则实现，文案复用 statusMap。 */
+const channelStatusFilterOptions: { value: ChannelStatusFilter; label: string }[] = [
+  { value: "all", label: "全部" },
+  { value: "healthy", label: statusMap.healthy.label },
+  { value: "low", label: statusMap.low.label },
+  { value: "failed", label: statusMap.failed.label },
+  { value: "idle", label: statusMap.idle.label },
+  { value: "paused", label: "已暂停" },
+]
+
+const channelSortOptions: {
+  value: ChannelSortMode
+  label: string
+  sort?: ChannelListSort
+  order?: ChannelListOrder
+}[] = [
+  { value: "default", label: "默认排序" },
+  { value: "name-asc", label: "名称 A→Z", sort: "name", order: "asc" },
+  { value: "name-desc", label: "名称 Z→A", sort: "name", order: "desc" },
+  { value: "username-asc", label: "账号 A→Z", sort: "username", order: "asc" },
+  { value: "username-desc", label: "账号 Z→A", sort: "username", order: "desc" },
+  { value: "health-asc", label: "健康状态（异常优先）", sort: "health", order: "asc" },
+  { value: "balance-asc", label: "余额从低到高", sort: "balance", order: "asc" },
+  { value: "balance-desc", label: "余额从高到低", sort: "balance", order: "desc" },
+]
+const CHANNEL_SORT_STORAGE_KEY = "monitor-channel-sort-v1"
+
+/** 读取上次选择的排序方式；只记忆排序，搜索与筛选条件不持久化。 */
+function loadChannelSortMode(): ChannelSortMode {
+  if (typeof window === "undefined") return "default"
+  try {
+    const raw = window.localStorage.getItem(CHANNEL_SORT_STORAGE_KEY)
+    return channelSortOptions.find((o) => o.value === raw)?.value ?? "default"
+  } catch {
+    return "default"
+  }
+}
+
+function saveChannelSortMode(v: ChannelSortMode) {
+  try {
+    window.localStorage.setItem(CHANNEL_SORT_STORAGE_KEY, v)
+  } catch {
+    /* ignore quota / private mode */
+  }
 }
 
 function StatTile({ label, children }: { label: string; children: React.ReactNode }) {
@@ -577,8 +667,40 @@ function SyncProgressStrip({ state }: { state: ChannelSyncState }) {
 export function ChannelCards() {
   const { data: channels, loading: channelsLoading } = useChannels()
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState<ChannelPageSize>(9)
-  const pageQuery = useChannelsPage(page, pageSize === "all" ? -1 : pageSize)
+  const [pageSize, setPageSize] = useState<ChannelPageSize>(loadChannelPageSize)
+  // 搜索 / 筛选 / 排序都在后端完成，保证跨页结果正确；searchInput 是输入框的即时值，search 是防抖后的值。
+  const [searchInput, setSearchInput] = useState("")
+  const [search, setSearch] = useState("")
+  // 输入法组字中（如拼音 "zhu li" 还没选词）不发起搜索；用 state 而不是 ref，组字结束后防抖 effect 才会重跑。
+  const [searchComposing, setSearchComposing] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<ChannelStatusFilter>("all")
+  const [tagFilter, setTagFilter] = useState("")
+  const [sortMode, setSortMode] = useState<ChannelSortMode>(loadChannelSortMode)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  // 标签候选取自全量渠道列表，只忽略 ASCII 大小写去重（与后端的标签去重规则一致，见 channelTagKey）。
+  const tagOptions = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const c of channels ?? []) {
+      for (const tag of c.tags ?? []) {
+        const key = channelTagKey(tag)
+        if (!seen.has(key)) seen.set(key, tag)
+      }
+    }
+    return [...seen.values()].sort((a, b) => a.localeCompare(b, "zh-CN"))
+  }, [channels])
+  // 选中的标签被删掉后自动视为"全部"，避免下拉框空白、列表却仍在按旧标签筛选。
+  const activeTag = tagFilter
+    ? (tagOptions.find((t) => channelTagKey(t) === channelTagKey(tagFilter)) ?? "")
+    : ""
+  const sortOption = channelSortOptions.find((o) => o.value === sortMode) ?? channelSortOptions[0]
+  const filtersActive = search !== "" || statusFilter !== "all" || activeTag !== ""
+  const pageQuery = useChannelsPage(page, pageSize === "all" ? -1 : pageSize, {
+    q: search,
+    status: statusFilter === "all" ? undefined : statusFilter,
+    tag: activeTag,
+    sort: sortOption.sort,
+    order: sortOption.order,
+  })
   const refresh = useTriggerRefresh()
   const { confirm, dialog: confirmDialog } = useConfirm()
   const [editing, setEditing] = useState<Channel | null>(null)
@@ -593,6 +715,12 @@ export function ChannelCards() {
   const [bulkSync, setBulkSync] = useState<BulkSyncState>({ running: false, completed: 0, total: 0 })
   const anySyncRunning = bulkSync.running || Object.values(syncState).some((s) => s.running)
   const channelPage = pageQuery.data
+  // 切换筛选 / 翻页后新结果到达前，channelPage 仍是旧条件的数据（useApi 不清空旧数据，避免闪烁）：
+  // pageStale 时旧列表只作占位（变暗）；countsStale 时旧的数量、页码和"没有匹配"都不能展示。
+  const pageStale = pageQuery.stale
+  const countsReady = channelPage != null && !pageQuery.countsStale
+  const pageError = pageQuery.error
+  const allChannelCount = channels?.length ?? "-"
   const visibleChannels = channelPage?.items ?? []
   const totalChannels = channelPage?.total ?? 0
   const pageSizeAll = pageSize === "all"
@@ -617,6 +745,38 @@ export function ChannelCards() {
   useEffect(() => {
     setPage((prev) => Math.min(prev, totalPages))
   }, [totalPages])
+
+  // 输入停顿 300ms 后才真正发起搜索，并回到第一页；输入法组字期间不计时。
+  useEffect(() => {
+    if (searchComposing) return
+    const next = searchInput.trim()
+    if (next === search) return
+    const timer = setTimeout(() => {
+      setSearch(next)
+      setPage(1)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchInput, search, searchComposing])
+
+  function clearSearch() {
+    setSearchInput("")
+    setSearchComposing(false)
+    if (search !== "") {
+      setSearch("")
+      setPage(1)
+    }
+    searchInputRef.current?.focus()
+  }
+
+  /** 清除搜索与筛选条件；排序是用户偏好，保留不动。 */
+  function clearFilters() {
+    setSearchInput("")
+    setSearchComposing(false)
+    setSearch("")
+    setStatusFilter("all")
+    setTagFilter("")
+    setPage(1)
+  }
 
   function clearHideTimer(id: number) {
     const t = hideTimers.current.get(id)
@@ -797,7 +957,10 @@ export function ChannelCards() {
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <span className="text-xs text-muted-foreground">
-            {totalChannels}{" 个渠道"}
+            {/* 筛选结果的数量要等新结果到达；渠道总数取全量列表，不受分页结果新旧影响 */}
+            {filtersActive
+              ? `筛选出 ${countsReady ? totalChannels : pageError ? "-" : "…"} 个 / 共 ${allChannelCount} 个渠道`
+              : `${channels?.length ?? (countsReady ? totalChannels : "-")} 个渠道`}
           </span>
           <Button
             variant="outline"
@@ -813,7 +976,7 @@ export function ChannelCards() {
             variant="outline"
             size="sm"
             className="gap-1.5 text-xs"
-            disabled={channelsLoading || totalChannels === 0}
+            disabled={channelsLoading || !channels?.length}
             onClick={() => setGroupsOpen(true)}
           >
             <Tags className="size-3.5" />
@@ -833,11 +996,114 @@ export function ChannelCards() {
         </div>
       </div>
 
-      {pageQuery.loading && !channelPage ? (
-        <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-          {"加载中…"}
-        </p>
-      ) : totalChannels === 0 ? (
+      {filtersActive || channels == null || channels.length > 0 ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <div className="relative w-full sm:w-auto sm:min-w-60 sm:flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              ref={searchInputRef}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onCompositionStart={() => setSearchComposing(true)}
+              onCompositionEnd={(e) => {
+                // 以确认后的文字为准；各浏览器 compositionend 与最后一次 input 的先后顺序不同。
+                setSearchComposing(false)
+                setSearchInput(e.currentTarget.value)
+              }}
+              maxLength={MAX_CHANNEL_SEARCH_LENGTH}
+              placeholder="搜索名称、账号、站点、备注或标签"
+              aria-label="搜索渠道"
+              className="h-8 pl-8 pr-8 md:text-xs"
+            />
+            {searchInput ? (
+              <button
+                type="button"
+                onClick={clearSearch}
+                aria-label="清除搜索"
+                title="清除搜索"
+                className="absolute right-1.5 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <X className="size-3.5" />
+              </button>
+            ) : null}
+          </div>
+          {/* 下拉框整体换行：宽度不够时搜索框独占一行，下拉框一起排到下一行 */}
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <Select
+              value={statusFilter}
+              onValueChange={(value) => {
+                setStatusFilter(channelStatusFilterOptions.find((o) => o.value === value)?.value ?? "all")
+                setPage(1)
+              }}
+            >
+              <SelectTrigger size="sm" aria-label="按状态筛选" className="h-8 min-w-32 flex-1 text-xs sm:w-36 sm:flex-none">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="shrink-0 text-muted-foreground">{"状态"}</span>
+                  <span className="min-w-0 truncate"><SelectValue /></span>
+                </span>
+              </SelectTrigger>
+              <SelectContent align="end">
+                {channelStatusFilterOptions.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {tagOptions.length > 0 ? (
+              <Select
+                value={activeTag ? `tag:${activeTag}` : "all"}
+                onValueChange={(value) => {
+                  // 标签值加 "tag:" 前缀，避免与"全部"的哨兵值冲突。
+                  setTagFilter(value.startsWith("tag:") ? value.slice(4) : "")
+                  setPage(1)
+                }}
+              >
+                <SelectTrigger size="sm" aria-label="按标签筛选" className="h-8 min-w-32 flex-1 text-xs sm:w-40 sm:flex-none">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="shrink-0 text-muted-foreground">{"标签"}</span>
+                    <span className="min-w-0 truncate"><SelectValue /></span>
+                  </span>
+                </SelectTrigger>
+                <SelectContent align="end" className="max-w-72">
+                  <SelectItem value="all">{"全部"}</SelectItem>
+                  {tagOptions.map((tag) => (
+                    <SelectItem key={tag} value={`tag:${tag}`} className="wrap-anywhere">
+                      {tag}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
+            <Select
+              value={sortMode}
+              onValueChange={(value) => {
+                const next = channelSortOptions.find((o) => o.value === value)?.value ?? "default"
+                setSortMode(next)
+                saveChannelSortMode(next)
+                setPage(1)
+              }}
+            >
+              <SelectTrigger size="sm" aria-label="排序方式" className="h-8 min-w-40 flex-1 text-xs sm:w-48 sm:flex-none">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <ArrowUpDown className="size-3.5 text-muted-foreground" />
+                  <span className="min-w-0 truncate"><SelectValue /></span>
+                </span>
+              </SelectTrigger>
+              <SelectContent align="end">
+                {channelSortOptions.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      ) : null}
+
+      {/* "还没有任何渠道" 只看全量列表：分页结果可能还是上一组筛选条件的（例如刚清除筛选） */}
+      {channels?.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border px-4 py-10 text-center">
           <p className="text-sm text-muted-foreground">{"还没有任何渠道。"}</p>
           <Button
@@ -852,8 +1118,38 @@ export function ChannelCards() {
             {"添加第一个渠道"}
           </Button>
         </div>
+      ) : pageError && (!channelPage || pageStale) ? (
+        <div className="rounded-lg border border-dashed border-border px-4 py-10 text-center">
+          <p className="text-sm text-muted-foreground">{`渠道列表加载失败：${pageError}`}</p>
+          <Button variant="outline" size="sm" className="mt-3 gap-1.5" onClick={pageQuery.refetch}>
+            <RefreshCw className="size-3.5" />
+            {"重试"}
+          </Button>
+        </div>
+      ) : !channelPage ||
+        (!countsReady && visibleChannels.length === 0) ||
+        // 未筛选却是 0 个而全量列表不为空（或还没到）：两次响应暂时不一致，等下一次结果
+        (countsReady && totalChannels === 0 && !filtersActive) ? (
+        <p
+          aria-busy="true"
+          className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground"
+        >
+          {"加载中…"}
+        </p>
+      ) : countsReady && totalChannels === 0 ? (
+        <div className="rounded-lg border border-dashed border-border px-4 py-10 text-center">
+          <p className="text-sm text-muted-foreground">{"没有匹配的渠道"}</p>
+          <Button variant="outline" size="sm" className="mt-3 gap-1.5" onClick={clearFilters}>
+            <FunnelX className="size-3.5" />
+            {"清除筛选"}
+          </Button>
+        </div>
       ) : (
-        <>
+        // 新条件的结果到达前先展示旧列表并变暗；延迟 150ms 再变暗，响应快时不会闪一下
+        <div
+          aria-busy={pageStale}
+          className={cn("transition-opacity duration-200", pageStale && "opacity-60 delay-150")}
+        >
           <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
             {visibleChannels.map((c) => {
               const status = statusOf(c)
@@ -861,22 +1157,35 @@ export function ChannelCards() {
               return (
                 <Card key={c.id} className="flex flex-col gap-0 border border-border p-3 shadow-none sm:p-4">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <span className="truncate text-sm font-semibold text-foreground">{c.name}</span>
-                      <span
-                        className={cn(
-                          "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset",
-                          c.type === "newapi"
-                            ? "bg-brand/10 text-brand ring-brand/20"
-                            : "bg-sky-500/10 text-sky-700 ring-sky-500/25 dark:text-sky-300",
-                        )}
-                      >
-                        {channelTypeLabel(c.type)}
-                      </span>
-                      {!c.monitor_enabled ? (
-                        <span className="inline-flex items-center rounded bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning ring-1 ring-inset ring-warning/20">
-                          {"已暂停"}
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="truncate text-sm font-semibold text-foreground">{c.name}</span>
+                        <span
+                          className={cn(
+                            "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset",
+                            c.type === "newapi"
+                              ? "bg-brand/10 text-brand ring-brand/20"
+                              : "bg-sky-500/10 text-sky-700 ring-sky-500/25 dark:text-sky-300",
+                          )}
+                        >
+                          {channelTypeLabel(c.type)}
                         </span>
+                        {!c.monitor_enabled ? (
+                          <span className="inline-flex items-center rounded bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning ring-1 ring-inset ring-warning/20">
+                            {"已暂停"}
+                          </span>
+                        ) : null}
+                      </div>
+                      {/* 账号参与搜索和"账号 A→Z"排序，展示出来才看得出命中和排序依据；token 模式常为空，不显示 */}
+                      {c.username.trim() ? (
+                        <p
+                          className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] leading-4 text-muted-foreground"
+                          title={`账号：${c.username}`}
+                        >
+                          <UserRound className="size-3 shrink-0" aria-hidden="true" />
+                          <span className="sr-only">{"账号："}</span>
+                          <span className="truncate">{c.username}</span>
+                        </p>
                       ) : null}
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
@@ -907,6 +1216,28 @@ export function ChannelCards() {
                       </Tooltip>
                     </div>
                   </div>
+
+                  {c.tags && c.tags.length > 0 ? (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {c.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="inline-block max-w-full truncate rounded bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium leading-4 text-muted-foreground ring-1 ring-inset ring-border"
+                          title={tag}
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {c.notes ? (
+                    <p
+                      className="mt-1.5 line-clamp-2 whitespace-pre-line break-words text-[11px] leading-4 text-muted-foreground"
+                      title={c.notes}
+                    >
+                      {c.notes}
+                    </p>
+                  ) : null}
 
                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
                     <StatTile label="余额">
@@ -1104,9 +1435,11 @@ export function ChannelCards() {
 
           <div className="mt-3 flex flex-col gap-2 rounded-lg border border-border bg-muted/10 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-xs text-muted-foreground">
-              {pageSizeAll
-                ? `显示全部 ${totalChannels} 个渠道`
-                : `显示 ${rangeStart}-${rangeEnd} / ${totalChannels} 个渠道`}
+              {!countsReady
+                ? "加载中…"
+                : pageSizeAll
+                  ? `显示全部 ${totalChannels} 个渠道`
+                  : `显示 ${rangeStart}-${rangeEnd} / ${totalChannels} 个渠道`}
             </div>
             <div className="flex flex-wrap items-center gap-2 sm:justify-end">
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -1114,7 +1447,9 @@ export function ChannelCards() {
                 <Select
                   value={String(pageSize)}
                   onValueChange={(value) => {
-                    setPageSize(value === "all" ? "all" : Number(value) as ChannelPageSize)
+                    const next = channelPageSizeOptions.find((v) => String(v) === value) ?? DEFAULT_CHANNEL_PAGE_SIZE
+                    setPageSize(next)
+                    saveChannelPageSize(next)
                     setPage(1)
                   }}
                 >
@@ -1135,7 +1470,7 @@ export function ChannelCards() {
                   variant="outline"
                   size="sm"
                   className="h-8 px-2 text-xs"
-                  disabled={pageSizeAll || currentPage <= 1}
+                  disabled={!countsReady || pageSizeAll || currentPage <= 1}
                   onClick={() => setPage(1)}
                 >
                   <ChevronsLeft className="size-3.5" />
@@ -1145,14 +1480,14 @@ export function ChannelCards() {
                   variant="outline"
                   size="sm"
                   className="h-8 px-2 text-xs"
-                  disabled={pageSizeAll || currentPage <= 1}
+                  disabled={!countsReady || pageSizeAll || currentPage <= 1}
                   onClick={() => setPage((prev) => Math.max(1, prev - 1))}
                 >
                   {"上一页"}
                 </Button>
-                {pageSizeAll ? (
+                {pageSizeAll || !countsReady ? (
                   <span className="min-w-12 text-center text-xs text-muted-foreground">
-                    {"全部"}
+                    {pageSizeAll ? "全部" : "…"}
                   </span>
                 ) : (
                   pagerNumbers.map((pageNumber) => (
@@ -1171,7 +1506,7 @@ export function ChannelCards() {
                   variant="outline"
                   size="sm"
                   className="h-8 px-2 text-xs"
-                  disabled={pageSizeAll || currentPage >= totalPages}
+                  disabled={!countsReady || pageSizeAll || currentPage >= totalPages}
                   onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
                 >
                   {"下一页"}
@@ -1180,7 +1515,7 @@ export function ChannelCards() {
                   variant="outline"
                   size="sm"
                   className="h-8 px-2 text-xs"
-                  disabled={pageSizeAll || currentPage >= totalPages}
+                  disabled={!countsReady || pageSizeAll || currentPage >= totalPages}
                   onClick={() => setPage(totalPages)}
                 >
                   <span className="hidden sm:inline">{"末页"}</span>
@@ -1189,7 +1524,7 @@ export function ChannelCards() {
               </div>
             </div>
           </div>
-        </>
+        </div>
       )}
 
       <ChannelFormDialog

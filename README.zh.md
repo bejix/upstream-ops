@@ -103,12 +103,16 @@ UpstreamOps 主要解决这些痛点：
 - 支持 Cloudflare Turnstile 打码配置，适用于开启 Turnstile 的上游登录场景。
 - 支持在渠道卡片中打开上游站点地址。
 - 支持在渠道卡片中清空已保存的登录信息。
+- 支持按名称、账号、站点地址、备注或标签搜索渠道，按状态（健康 / 低余额 / 登录失败 / 尚未采集 / 已暂停）或标签筛选，并按名称、账号（中文按拼音）、健康状态或余额排序。
+- 支持为渠道添加自定义标签和备注，标签可直接用于筛选。
+- 渠道卡片显示登录账号；渠道列表每页显示数量会保存在浏览器中，刷新后保持不变。
 - 支持「仅显示已创建密钥的分组」开关：开启后渠道卡片、分组对话框、倍率面板和倍率变动通知只关注已创建密钥的分组；网关转发和通知设置仍可看到全部分组，本地倍率快照也始终保留全量。
 - 删除上游渠道时会自动清理相关快照、倍率、公告、通知冷却和通知日志。
 
 ### 余额与消费监控
 
 - 首页展示总余额、今日消费、累计消费、最低余额渠道、异常渠道数量。
+- 今日消费按北京时间跨天：渠道当天还没有采集到消费（例如已暂停监控）时，今日消费显示为 0。
 - 支持周期性采集余额和消费。
 - 支持余额历史趋势图。
 - 支持余额低于阈值时通知推送。
@@ -316,7 +320,7 @@ IMAGE_TAG=latest
 生产环境建议锁定具体版本，例如：
 
 ```env
-IMAGE_TAG=v0.0.9
+IMAGE_TAG=v0.0.10
 ```
 
 ## MySQL 部署
@@ -494,6 +498,8 @@ POST /api/settings/proxy/test
 填写上游站点地址、用户名、密码。若上游登录接口需要额外字段，可以在“附加表单参数”中填写 JSON 对象；若上游开启 Turnstile，需要先在“验证码服务”中配置打码平台，然后在渠道中启用 Turnstile。
 
 新版 NewAPI（QuantumNous/new-api 及其分叉）登录后改用短期 `access_token`（Bearer JWT，默认 15 分钟）鉴权，并随响应下发 `new_api_refresh` 刷新令牌。UpstreamOps 会在令牌临近过期时自动调用 `/api/user/auth/refresh` 续期并轮换刷新令牌，无需频繁重新登录；老版本 NewAPI 仍走 `Set-Cookie: session=...` + `New-Api-User` 头鉴权，由程序自动识别兼容。
+
+登录与续期请求会携带由站点地址推导的 `Origin` / `Referer`。只有上游明确返回 401（刷新令牌失效）时才回退到账号密码重新登录；403、409、429、5xx、网络错误等其它失败会保留现有会话并记录错误，避免反复登录占满上游的会话数上限。同一渠道的会话刷新与登录会串行执行。
 
 #### Token/Cookie 模式
 
@@ -788,8 +794,21 @@ GET /api/announcements?page=1&page_size=20
 ```text
 GET /api/channels?page=1&page_size=20
 GET /api/channels?page=1&page_size=-1  (返回全部)
+GET /api/channels?page=1&page_size=20&q=vip&status=healthy&tag=备用&sort=balance&order=desc
 POST /api/channels/:id/clear-login-info
 ```
+
+分页模式（带 `page` / `page_size`）支持以下可选参数，不带分页参数的全量列表会忽略它们：
+
+- `q`：按名称、账号、站点地址、备注、标签做子串搜索（忽略英文大小写），最多 200 个字符。
+- `status`：`healthy`（健康）、`low`（低余额）、`failed`（登录失败）、`idle`（尚未采集）、`paused`（已暂停）。
+- `tag`：单个标签精确匹配（忽略英文大小写），不能含逗号，最多 32 个字符。
+- `sort`：`default`（默认，按渠道排序值）、`name`、`username`、`health`、`balance`；名称和账号依次按数字符号、中文（按拼音）、英文字母（忽略大小写）排序，与浏览器 `zh-CN` 的排序一致（个别多音字可能不同）；空账号和未采集余额的渠道总是排在最后。
+- `order`：`asc`（默认）或 `desc`，`sort=default` 时忽略。
+
+取值不合法或超长时返回 400；`total` / `pages` 为筛选后的数量。
+
+使用 MySQL 时，`q` / `tag` 的匹配遵循数据库的排序规则：MySQL 8 默认的 `utf8mb4_0900_ai_ci` 还会忽略重音、非英文字母的大小写和全角 / 半角差异（例如 `tag=Ärger` 也会命中 `ärger`，`tag=vip` 也会命中 `ＶＩＰ`）。
 
 返回统一分页结构：
 

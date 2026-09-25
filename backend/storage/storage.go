@@ -123,7 +123,7 @@ func AutoMigrate(db *gorm.DB) error {
 		return err
 	}
 	// 仅 AutoMigrate 当前模型（网关未发布，不做「密钥→组」等历史数据迁移）
-	return db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&Channel{},
 		&AuthSession{},
 		&CaptchaConfig{},
@@ -142,7 +142,35 @@ func AutoMigrate(db *gorm.DB) error {
 		&GatewayProvider{},
 		&GatewayUsageLog{},
 		&ModelPriceOverride{},
-	)
+	); err != nil {
+		return err
+	}
+	return backfillChannelTodayCostAt(db)
+}
+
+// backfillChannelTodayCostAt 给升级前写入的 today_cost 补上采集时间 today_cost_at。
+//
+// 旧版本只写 today_cost 不记时间。不能在读取时拿 last_balance_at 代替：余额单独刷新
+// （兑换码充值、消费采集失败等）会把它更新到今天，已经过期的 today_cost 又会被当成今日数据。
+// 所以在迁移时一次性回填：优先取该渠道最近一条消费快照的 sampled_at（与 today_cost
+// 同一轮采集写入）；快照已被清理的，退回当时的 last_balance_at。两者都没有的保持 NULL，
+// EffectiveTodayCost 原样返回。
+//
+// 只处理 today_cost_at IS NULL 的行，重复执行无副作用；子查询读的是另一张表，
+// SQLite 与 MySQL 的 UPDATE 都支持。
+func backfillChannelTodayCostAt(db *gorm.DB) error {
+	const pending = "today_cost_at IS NULL AND today_cost IS NOT NULL"
+	if err := db.Exec("UPDATE channels SET today_cost_at = (" +
+		"SELECT MAX(cost_snapshots.sampled_at) FROM cost_snapshots WHERE cost_snapshots.channel_id = channels.id" +
+		") WHERE " + pending +
+		" AND EXISTS (SELECT 1 FROM cost_snapshots WHERE cost_snapshots.channel_id = channels.id)").Error; err != nil {
+		return fmt.Errorf("backfill channels.today_cost_at from cost_snapshots: %w", err)
+	}
+	if err := db.Exec("UPDATE channels SET today_cost_at = last_balance_at WHERE " + pending +
+		" AND last_balance_at IS NOT NULL").Error; err != nil {
+		return fmt.Errorf("backfill channels.today_cost_at from last_balance_at: %w", err)
+	}
+	return nil
 }
 
 func dropObsoleteRateSiteColumns(db *gorm.DB) error {

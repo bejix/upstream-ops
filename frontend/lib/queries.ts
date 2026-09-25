@@ -8,6 +8,9 @@ import type {
   BalanceTrendPoint,
   CaptchaConfig,
   Channel,
+  ChannelListOrder,
+  ChannelListSort,
+  ChannelListStatus,
   ChannelPage,
   CostTrendPoint,
   DashboardSummary,
@@ -24,6 +27,13 @@ export interface QueryState<T> {
   data: T | null
   loading: boolean
   error: string | null
+  /** data 是用哪个 path 拉到的；还没拿到过数据时为 null。 */
+  dataPath: string | null
+  /**
+   * path 已经变了、新 path 的数据还没到，data 仍是旧 path 的结果。
+   * 同一 path 的轮询 / refetch 不算 stale；需要区分"旧条件的数据"时用它（例如筛选条件切换）。
+   */
+  stale: boolean
   refetch: () => void
   setData: (data: T) => void
 }
@@ -76,10 +86,12 @@ function fetchShared<T>(path: string, key: string): Promise<T> {
  * useApi 通用数据获取 hook（stale-while-revalidate）。
  * - 首次加载：loading = true，组件显示加载占位
  * - 后续刷新（refresh tick / refetch）：保留旧 data 继续展示，loading 不切回 true，后台静默拉新
+ * - path 变化时同样保留旧 data，新数据到达前 stale = true，调用方可据此区分新旧条件的结果
  * - 同 URL + 同 tick 的并发调用共享一次请求
  */
 function useApi<T>(path: string | null, watchRefresh = true): QueryState<T> {
   const [data, setData] = useState<T | null>(null)
+  const [dataPath, setDataPath] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(path !== null)
   const [error, setError] = useState<string | null>(null)
   const [bump, setBump] = useState(0)
@@ -104,6 +116,7 @@ function useApi<T>(path: string | null, watchRefresh = true): QueryState<T> {
         if (cancelled) return
         hasDataRef.current = true
         setData(d)
+        setDataPath(path)
       })
       .catch((e: Error) => {
         if (cancelled) return
@@ -122,10 +135,13 @@ function useApi<T>(path: string | null, watchRefresh = true): QueryState<T> {
     data,
     loading,
     error,
+    dataPath,
+    stale: dataPath !== null && dataPath !== path,
     refetch: () => setBump((b) => b + 1),
     setData: (nextData) => {
       hasDataRef.current = true
       setData(nextData)
+      setDataPath(path)
     },
   }
 }
@@ -164,8 +180,54 @@ export function useChannels() {
   return useApi<Channel[]>("/channels")
 }
 
-export function useChannelsPage(page = 1, pageSize = 9) {
-  return useApi<ChannelPage>(`/channels?page=${page}&page_size=${pageSize}`)
+/** 渠道分页列表的搜索 / 筛选 / 排序条件，空值不会拼进查询串 */
+export interface ChannelPageFilter {
+  q?: string
+  status?: ChannelListStatus
+  tag?: string
+  sort?: ChannelListSort
+  order?: ChannelListOrder
+}
+
+// 固定参数顺序，保证同样的条件得到同样的 URL，便于 fetchShared 去重。
+const channelPageFilterKeys = ["q", "status", "tag", "sort", "order"] as const
+
+// total / pages 只取决于这几个参数；翻页、改排序时旧结果里的计数仍然准确。
+const channelPageCountKeys = ["page_size", "q", "status", "tag"] as const
+
+function channelPageCountsKey(path: string): string {
+  const qs = new URLSearchParams(path.slice(path.indexOf("?") + 1))
+  return channelPageCountKeys.map((key) => `${key}=${qs.get(key) ?? ""}`).join("&")
+}
+
+export interface ChannelPageQueryState extends QueryState<ChannelPage> {
+  /**
+   * data 的 total / pages 属于旧的筛选条件或每页数量（新结果还没到）：
+   * 此时不要展示筛选数量、页码或"没有匹配"，旧列表只能作为占位。翻页、改排序不会置为 true。
+   */
+  countsStale: boolean
+}
+
+export function useChannelsPage(
+  page = 1,
+  pageSize = 9,
+  filter: ChannelPageFilter = {},
+): ChannelPageQueryState {
+  const qs = new URLSearchParams()
+  qs.set("page", String(page))
+  qs.set("page_size", String(pageSize))
+  for (const key of channelPageFilterKeys) {
+    const value = filter[key]?.trim()
+    if (value) qs.set(key, value)
+  }
+  const path = `/channels?${qs.toString()}`
+  const query = useApi<ChannelPage>(path)
+  return {
+    ...query,
+    countsStale:
+      query.dataPath !== null &&
+      channelPageCountsKey(query.dataPath) !== channelPageCountsKey(path),
+  }
 }
 
 export function useChannelRates(channelID: number | null, onlyWithKeys = false) {

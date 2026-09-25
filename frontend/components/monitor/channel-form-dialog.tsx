@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useState, type FormEvent } from "react"
-import { HelpCircle } from "lucide-react"
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react"
+import { HelpCircle, X } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/popover"
 import type { Channel, ChannelType, CredentialMode, RechargeMultiplierMode } from "@/lib/api-types"
 import { apiFetch } from "@/lib/api"
+import { channelTagKey } from "@/lib/channel-tags"
 import { useTriggerRefresh } from "@/lib/refresh-context"
 import { useCaptchaConfigs } from "@/lib/queries"
 import { cn } from "@/lib/utils"
@@ -77,6 +78,41 @@ interface FormState {
   subscription_enabled: boolean
   proxy_enabled: boolean
   captcha_config_id: string // "" 表示不绑定
+
+  notes: string
+  // 标签：tags 为已确认的 chip，tag_input 为输入框里尚未确认的文本（提交时一并加入）
+  tags: string[]
+  tag_input: string
+}
+
+// 与后端 storage.MaxChannelTags / MaxChannelTagRunes / MaxChannelNotesRunes 保持一致
+const MAX_TAGS = 20
+const MAX_TAG_LENGTH = 32
+const MAX_NOTES_LENGTH = 2000
+
+/** charLength 按 Unicode 码点计数，与后端 utf8.RuneCountInString 对齐。 */
+function charLength(s: string): number {
+  return Array.from(s).length
+}
+
+/**
+ * normalizeTags 与后端 storage.NormalizeChannelTags 规则一致：
+ * 按半角 / 全角逗号拆分、去首尾空白、丢弃空项、只忽略 ASCII 大小写去重（保留首次出现的写法与顺序）。
+ */
+function normalizeTags(list: string[]): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const raw of list) {
+    for (const part of raw.split(/[,，]/)) {
+      const tag = part.trim()
+      if (!tag) continue
+      const key = channelTagKey(tag)
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(tag)
+    }
+  }
+  return out
 }
 
 function initialState(c?: Channel | null): FormState {
@@ -106,6 +142,9 @@ function initialState(c?: Channel | null): FormState {
     subscription_enabled: c?.subscription_enabled ?? false,
     proxy_enabled: c?.proxy_enabled ?? false,
     captcha_config_id: c?.captcha_config_id != null ? String(c.captcha_config_id) : "",
+    tags: normalizeTags(c?.tags ?? []),
+    tag_input: "",
+    notes: c?.notes ?? "",
   }
 }
 
@@ -154,6 +193,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
   // 编辑模式下，若 credential_mode 没变，token / password 都可以留空表示不修改。
   const modeChanged = isEdit && form.credential_mode !== (channel?.credential_mode ?? "password")
   const existingNewAPIUserID = isEdit && channel?.type === "newapi" ? (channel.user_id ?? "").trim() : ""
+  const notesLength = charLength(form.notes.trim())
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -175,6 +215,19 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
         if (!Number.isFinite(rechargeMultiplier) || rechargeMultiplier <= 0) {
           throw new Error("充值倍率必须大于 0，或留空跟随上游")
         }
+      }
+      // 输入框里未确认的文本也算作标签
+      const tags = normalizeTags([...form.tags, form.tag_input])
+      if (tags.length > MAX_TAGS) {
+        throw new Error(`标签最多 ${MAX_TAGS} 个`)
+      }
+      const longTag = tags.find((tag) => charLength(tag) > MAX_TAG_LENGTH)
+      if (longTag) {
+        throw new Error(`单个标签最多 ${MAX_TAG_LENGTH} 个字符：${longTag}`)
+      }
+      const notes = form.notes.trim()
+      if (notesLength > MAX_NOTES_LENGTH) {
+        throw new Error(`备注最多 ${MAX_NOTES_LENGTH} 个字符`)
       }
       const loginExtraParams = isTokenMode ? "" : form.login_extra_params.trim()
       if (loginExtraParams) {
@@ -266,6 +319,8 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
           subscription_enabled: supportsSubscription && form.subscription_enabled,
           proxy_enabled: form.proxy_enabled,
           captcha_config_id: captchaConfigID,
+          tags,
+          notes,
         }
         if (!isTokenMode && form.password) body.password = form.password
         if (isTokenMode && tokenCredential) body.token_credential = tokenCredential
@@ -296,6 +351,8 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
             subscription_enabled: supportsSubscription && form.subscription_enabled,
             proxy_enabled: form.proxy_enabled,
             captcha_config_id: captchaConfigID,
+            tags,
+            notes,
           }),
         })
       }
@@ -376,6 +433,43 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
             />
           </div>
 
+          <div className="space-y-1.5">
+            <Label htmlFor="channel-tags">标签（可选）</Label>
+            <TagsInput
+              id="channel-tags"
+              tags={form.tags}
+              input={form.tag_input}
+              onChange={(tags, tag_input) => setForm({ ...form, tags, tag_input })}
+              disabled={submitting}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              {`回车或逗号确认，最多 ${MAX_TAGS} 个，每个不超过 ${MAX_TAG_LENGTH} 个字符`}
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="channel-notes">备注（可选）</Label>
+            <Textarea
+              id="channel-notes"
+              placeholder="如：主力渠道，晚高峰较慢"
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              rows={2}
+              className="field-sizing-fixed text-sm"
+              disabled={submitting}
+            />
+            {notesLength > MAX_NOTES_LENGTH * 0.9 ? (
+              <p
+                className={cn(
+                  "text-right text-[11px]",
+                  notesLength > MAX_NOTES_LENGTH ? "text-destructive" : "text-muted-foreground",
+                )}
+              >
+                {`${notesLength} / ${MAX_NOTES_LENGTH}`}
+              </p>
+            ) : null}
+          </div>
+
           {/* 凭据类型 toggle */}
           <div className="space-y-1.5">
             <Label>凭据类型</Label>
@@ -449,7 +543,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
           {isTokenMode ? (
             <>
               <div className="space-y-1.5">
-                <Label htmlFor="username-display">备注（可选）</Label>
+                <Label htmlFor="username-display">账号 / 邮箱（可选）</Label>
                 <Input
                   id="username-display"
                   placeholder="如：worry@example.com"
@@ -803,6 +897,107 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
         </form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+interface TagsInputProps {
+  id: string
+  tags: string[]
+  input: string
+  onChange: (tags: string[], input: string) => void
+  disabled?: boolean
+}
+
+/**
+ * TagsInput 标签输入：回车、半角 "," 或全角 "，" 把当前文本确认为 chip；
+ * 输入框为空时按 Backspace 删除最后一个 chip；chip 上的 × 可用键盘聚焦后回车删除。
+ * 超长的 chip 标红提示，真正的限制在提交时统一校验。
+ */
+function TagsInput({ id, tags, input, onChange, disabled }: TagsInputProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  function handleInputChange(value: string) {
+    // 逗号来自键盘、输入法或粘贴都走这里：最后一个逗号之前的内容确认为 chip，其余留在输入框
+    const parts = value.split(/[,，]/)
+    if (parts.length === 1) {
+      onChange(tags, value)
+      return
+    }
+    const rest = parts.pop() ?? ""
+    onChange(normalizeTags([...tags, ...parts]), rest)
+  }
+
+  function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    // 输入法组字过程中的回车 / 退格交给输入法处理（Safari 确认候选词时 isComposing 已为 false，靠 keyCode 229 识别）
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return
+    if (e.key === "Enter") {
+      // 避免在标签框里回车直接提交整个表单
+      e.preventDefault()
+      if (input.trim()) onChange(normalizeTags([...tags, input]), "")
+      return
+    }
+    if (e.key === "Backspace" && input === "" && tags.length > 0) {
+      e.preventDefault()
+      onChange(tags.slice(0, -1), input)
+    }
+  }
+
+  function removeTag(index: number) {
+    onChange(
+      tags.filter((_, i) => i !== index),
+      input,
+    )
+    inputRef.current?.focus()
+  }
+
+  return (
+    <div
+      className={cn(
+        "flex min-h-9 w-full flex-wrap items-center gap-1.5 rounded-md border border-input bg-transparent px-2 py-1.5 shadow-xs transition-[color,box-shadow] dark:bg-input/30",
+        "focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50",
+        disabled && "cursor-not-allowed opacity-50",
+      )}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) inputRef.current?.focus()
+      }}
+    >
+      {tags.map((tag, index) => {
+        const tooLong = charLength(tag) > MAX_TAG_LENGTH
+        return (
+          <span
+            key={tag}
+            className={cn(
+              "inline-flex max-w-full items-center gap-0.5 rounded bg-muted py-0.5 pr-0.5 pl-1.5 text-xs text-foreground ring-1 ring-inset",
+              tooLong ? "text-destructive ring-destructive/50" : "ring-border",
+            )}
+            title={tooLong ? `超过 ${MAX_TAG_LENGTH} 个字符：${tag}` : tag}
+          >
+            {/* 允许折行而不是 truncate：nowrap 会把弹窗撑宽 */}
+            <span className="min-w-0 wrap-anywhere">{tag}</span>
+            <button
+              type="button"
+              onClick={() => removeTag(index)}
+              disabled={disabled}
+              aria-label={`移除标签 ${tag}`}
+              className="inline-flex shrink-0 items-center justify-center rounded-sm p-0.5 text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none"
+            >
+              <X className="size-3" />
+            </button>
+          </span>
+        )
+      })}
+      <input
+        ref={inputRef}
+        id={id}
+        value={input}
+        onChange={(e) => handleInputChange(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder={tags.length === 0 ? "输入后按回车添加" : ""}
+        disabled={disabled}
+        autoComplete="off"
+        className="h-6 min-w-24 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed md:text-sm"
+      />
+    </div>
   )
 }
 

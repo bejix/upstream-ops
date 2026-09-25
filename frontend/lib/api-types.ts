@@ -61,9 +61,14 @@ export interface Channel {
   recharge_multiplier_mode: RechargeMultiplierMode
   monitor_enabled: boolean
   only_created_key_groups_enabled: boolean
+  /** 自定义标签；旧后端可能缺失，按空数组处理 */
+  tags?: string[]
+  /** 备注；缺失按空字符串处理 */
+  notes?: string
   last_balance?: number | null
   last_balance_at?: string | null
   today_cost?: number | null
+  today_cost_at?: string | null
   total_cost?: number | null
   last_error?: string
   created_at: string
@@ -77,6 +82,14 @@ export interface ChannelPage {
   page_size: number
   pages: number
 }
+
+/** GET /api/channels 分页模式的 status 筛选值（backend/storage/channel_list.go） */
+export type ChannelListStatus = "healthy" | "low" | "failed" | "idle" | "paused"
+
+/** GET /api/channels 分页模式的 sort 取值；不传即 default（sort_order DESC, id ASC） */
+export type ChannelListSort = "default" | "name" | "username" | "health" | "balance"
+
+export type ChannelListOrder = "asc" | "desc"
 
 export interface CaptchaConfig {
   id: number

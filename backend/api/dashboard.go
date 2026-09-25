@@ -44,15 +44,18 @@ func dashboardSummary(c *gin.Context, d *Deps) {
 	var totalCost float64
 	var lowest *dashboardLowest
 	var activeCount, failedCount int
+	now := costNow()
 
 	for _, ch := range channels {
+		// 暂停监控后缓存的今日消费不会刷新，跨天后按 0 展示与汇总。
+		todayCost := ch.EffectiveTodayCost(now)
 		stat := dashboardChannelStat{
 			ID:             ch.ID,
 			Name:           ch.Name,
 			Type:           string(ch.Type),
 			MonitorEnabled: ch.MonitorEnabled,
 			LastBalance:    ch.LastBalance,
-			TodayCost:      ch.TodayCost,
+			TodayCost:      todayCost,
 			TotalCost:      ch.TotalCost,
 			LastError:      ch.LastError,
 		}
@@ -69,8 +72,8 @@ func dashboardSummary(c *gin.Context, d *Deps) {
 				lowest = &dashboardLowest{ChannelID: ch.ID, Name: ch.Name, Balance: &bal}
 			}
 		}
-		if ch.TodayCost != nil {
-			todayTotalCost += *ch.TodayCost
+		if todayCost != nil {
+			todayTotalCost += *todayCost
 		}
 		if ch.TotalCost != nil {
 			totalCost += *ch.TotalCost

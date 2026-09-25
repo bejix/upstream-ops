@@ -593,7 +593,8 @@ func TestUpdateCosts(t *testing.T) {
 		t.Fatalf("create channel: %v", err)
 	}
 
-	if err := channels.UpdateCosts(c.ID, 1.23, 9.87); err != nil {
+	at := time.Date(2026, 6, 20, 10, 30, 0, 0, time.UTC)
+	if err := channels.UpdateCosts(c.ID, 1.23, 9.87, at); err != nil {
 		t.Fatalf("update costs: %v", err)
 	}
 
@@ -607,7 +608,132 @@ func TestUpdateCosts(t *testing.T) {
 	if got.TotalCost == nil || *got.TotalCost != 9.87 {
 		t.Fatalf("total cost mismatch: %#v", got.TotalCost)
 	}
+	if got.TodayCostAt == nil || !got.TodayCostAt.Equal(at) {
+		t.Fatalf("today cost at mismatch: %#v, want %v", got.TodayCostAt, at)
+	}
 }
+
+func TestChannelEffectiveTodayCost(t *testing.T) {
+	loc := time.FixedZone("UTC+8", 8*60*60)
+	at := func(day, hour, minute int) *time.Time {
+		v := time.Date(2026, 6, day, hour, minute, 0, 0, loc)
+		return &v
+	}
+	cost := 3.5
+	now := time.Date(2026, 6, 20, 10, 0, 0, 0, loc)
+
+	cases := []struct {
+		name string
+		ch   Channel
+		now  time.Time
+		want *float64
+	}{
+		{
+			name: "same day keeps cost",
+			ch:   Channel{TodayCost: &cost, TodayCostAt: at(20, 8, 0)},
+			now:  now,
+			want: &cost,
+		},
+		{
+			name: "previous day resets to zero",
+			ch:   Channel{TodayCost: &cost, TodayCostAt: at(19, 23, 59)},
+			now:  now,
+			want: ptrFloat(0),
+		},
+		{
+			name: "just after midnight resets to zero",
+			ch:   Channel{TodayCost: &cost, TodayCostAt: at(19, 23, 50)},
+			now:  time.Date(2026, 6, 20, 0, 0, 1, 0, loc),
+			want: ptrFloat(0),
+		},
+		{
+			name: "sample just after midnight is today",
+			ch:   Channel{TodayCost: &cost, TodayCostAt: at(20, 0, 1)},
+			now:  time.Date(2026, 6, 20, 0, 5, 0, 0, loc),
+			want: &cost,
+		},
+		{
+			// 采样为 UTC 6/19 15:30（北京时间 6/19 23:30），now 为北京时间 6/20 00:30（UTC 仍是 6/19）：
+			// 按 UTC 比较会误判为同一天，须按北京时间换算日期。
+			name: "sample in utc compares dates in beijing time",
+			ch: Channel{TodayCost: &cost, TodayCostAt: func() *time.Time {
+				v := time.Date(2026, 6, 19, 15, 30, 0, 0, time.UTC) // UTC+8: 6/19 23:30
+				return &v
+			}()},
+			now:  time.Date(2026, 6, 20, 0, 30, 0, 0, loc), // UTC: 6/19 16:30
+			want: ptrFloat(0),
+		},
+		{
+			// 服务器进程在 UTC（如 docker run 未设 TZ）：now 是 UTC 6/19 17:00，即北京时间 6/20 01:00，
+			// 已经跨天，要与按北京时间换日的趋势图一致，不能按 now 自带的 UTC 判断成同一天。
+			name: "now in utc resets at beijing midnight",
+			ch:   Channel{TodayCost: &cost, TodayCostAt: at(19, 23, 0)},
+			now:  time.Date(2026, 6, 19, 17, 0, 0, 0, time.UTC),
+			want: ptrFloat(0),
+		},
+		{
+			// 反过来：UTC 已经到 6/20，但北京时间 6/20 07:00 的采样与 08:30 的 now 仍是同一天。
+			name: "now in utc keeps cost within beijing day",
+			ch:   Channel{TodayCost: &cost, TodayCostAt: at(20, 7, 0)},
+			now:  time.Date(2026, 6, 20, 0, 30, 0, 0, time.UTC),
+			want: &cost,
+		},
+		{
+			// 旧数据的采集时间由 AutoMigrate 回填，读取时不再拿 LastBalanceAt 推断。
+			name: "missing today cost at ignores stale last balance at",
+			ch:   Channel{TodayCost: &cost, LastBalanceAt: at(18, 12, 0)},
+			now:  now,
+			want: &cost,
+		},
+		{
+			name: "missing today cost at ignores fresh last balance at",
+			ch:   Channel{TodayCost: &cost, LastBalanceAt: at(20, 9, 0)},
+			now:  now,
+			want: &cost,
+		},
+		{
+			// 余额单独刷新到今天，不能让昨天的消费重新变成"今日消费"。
+			name: "fresh last balance at does not revive stale cost",
+			ch:   Channel{TodayCost: &cost, TodayCostAt: at(19, 22, 0), LastBalanceAt: at(20, 9, 0)},
+			now:  now,
+			want: ptrFloat(0),
+		},
+		{
+			name: "nil cost stays nil",
+			ch:   Channel{TodayCostAt: at(18, 12, 0)},
+			now:  now,
+			want: nil,
+		},
+		{
+			name: "no timestamps keeps cost",
+			ch:   Channel{TodayCost: &cost},
+			now:  now,
+			want: &cost,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.ch.EffectiveTodayCost(tc.now)
+			switch {
+			case tc.want == nil && got != nil:
+				t.Fatalf("got %v, want nil", *got)
+			case tc.want != nil && got == nil:
+				t.Fatalf("got nil, want %v", *tc.want)
+			case tc.want != nil && *got != *tc.want:
+				t.Fatalf("got %v, want %v", *got, *tc.want)
+			}
+		})
+	}
+
+	// 归零只作用于返回值，不能改写渠道上的原始数据。
+	stale := Channel{TodayCost: &cost, TodayCostAt: at(19, 12, 0)}
+	_ = stale.EffectiveTodayCost(now)
+	if stale.TodayCost == nil || *stale.TodayCost != 3.5 {
+		t.Fatalf("original today cost mutated: %#v", stale.TodayCost)
+	}
+}
+
+func ptrFloat(v float64) *float64 { return &v }
 
 func TestHardDeleteAllowsReusingNames(t *testing.T) {
 	db := openTestDB(t)
