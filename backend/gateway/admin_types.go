@@ -131,6 +131,24 @@ type RouteInput struct {
 	UserAgentCustom string `json:"user_agent_custom"`
 }
 
+type BindRouteKeyInput struct {
+	SourceAPIKeyID int64 `json:"source_api_key_id"`
+}
+
+type RouteKeyBindingError struct {
+	Code    string
+	Message string
+	cause   error
+}
+
+func (e *RouteKeyBindingError) Error() string {
+	return e.Message
+}
+
+func (e *RouteKeyBindingError) Unwrap() error {
+	return e.cause
+}
+
 // EnsureKeyRouteResult 单条路由 Ensure 上游密钥的结果。
 type EnsureKeyRouteResult struct {
 	RouteID      uint   `json:"route_id"`

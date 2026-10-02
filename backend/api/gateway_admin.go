@@ -4,6 +4,8 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"github.com/bejix/upstream-ops/backend/gateway"
 	"github.com/bejix/upstream-ops/backend/storage"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // registerGatewayAdmin 在管理 API 下注册 /gateway/* 路由。
@@ -36,6 +39,7 @@ func registerGatewayAdmin(g *gin.RouterGroup, d *Deps) {
 		// routes under group
 		gp.GET("/groups/:id/routes", func(c *gin.Context) { listGatewayGroupRoutes(c, d) })
 		gp.PUT("/groups/:id/routes", func(c *gin.Context) { saveGatewayGroupRoutes(c, d) })
+		gp.PUT("/groups/:id/routes/:route_id/key", func(c *gin.Context) { bindGatewayRouteKey(c, d) })
 		gp.POST("/groups/:id/routes/ensure-keys", func(c *gin.Context) { ensureGatewayGroupRouteKeys(c, d) })
 
 		// models
@@ -329,6 +333,60 @@ func saveGatewayGroupRoutes(c *gin.Context, d *Deps) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": list})
+}
+
+func bindGatewayRouteKey(c *gin.Context, d *Deps) {
+	groupID, err := parseUintParam(c, "id")
+	if err != nil || groupID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group id"})
+		return
+	}
+	routeID, err := parseUintParam(c, "route_id")
+	if err != nil || routeID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid route id"})
+		return
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 4096))
+	opening, err := decoder.Token()
+	if err != nil || opening != json.Delim('{') {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body must contain only a positive source_api_key_id"})
+		return
+	}
+	field, err := decoder.Token()
+	if err != nil || field != "source_api_key_id" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body must contain only a positive source_api_key_id"})
+		return
+	}
+	var in gateway.BindRouteKeyInput
+	if err := decoder.Decode(&in.SourceAPIKeyID); err != nil || in.SourceAPIKeyID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body must contain only a positive source_api_key_id"})
+		return
+	}
+	closing, err := decoder.Token()
+	if err != nil || closing != json.Delim('}') {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body must contain only a positive source_api_key_id"})
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body must contain a single JSON object"})
+		return
+	}
+	route, err := d.Gateway.BindRouteKey(c.Request.Context(), groupID, routeID, in)
+	if err != nil {
+		var bindingError *gateway.RouteKeyBindingError
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "gateway group or route not found"})
+		case errors.Is(err, storage.ErrGatewayRouteChanged):
+			c.JSON(http.StatusConflict, gin.H{"error": "route changed during key binding; reload the route and retry"})
+		case errors.As(err, &bindingError):
+			c.JSON(http.StatusBadRequest, gin.H{"error": bindingError.Message, "code": bindingError.Code})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "unable to bind route key"})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, route)
 }
 
 func ensureGatewayGroupRouteKeys(c *gin.Context, d *Deps) {

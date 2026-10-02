@@ -120,8 +120,12 @@ func (s *Service) EnsureRouteKeys(ctx context.Context, groupID uint) (*EnsureKey
 	return s.admin().EnsureRouteKeys(ctx, groupID)
 }
 
-func (s *Service) ensureRouteKeyResult(ctx context.Context, groupID uint, r *storage.GatewayRoute, lockKeyName func(string) func()) EnsureKeyRouteResult {
-	return s.admin().ensureRouteKeyResult(ctx, groupID, r, lockKeyName)
+func (s *Service) BindRouteKey(ctx context.Context, groupID, routeID uint, in BindRouteKeyInput) (*storage.GatewayRoute, error) {
+	return s.admin().BindRouteKey(ctx, groupID, routeID, in)
+}
+
+func (s *Service) ensureRouteKeyResult(ctx context.Context, groupID uint, r *storage.GatewayRoute) EnsureKeyRouteResult {
+	return s.admin().ensureRouteKeyResult(ctx, groupID, r)
 }
 
 func (s *Service) ensureSourceAPIKey(ctx context.Context, groupID uint, route *storage.GatewayRoute) error {

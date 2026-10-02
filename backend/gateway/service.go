@@ -32,7 +32,6 @@ type ChannelAPI interface {
 	ListAPIKeys(ctx context.Context, channelID uint, query connector.APIKeyQuery) (*connector.APIKeyPage, error)
 	ListAPIKeyGroups(ctx context.Context, channelID uint) ([]connector.APIKeyGroup, error)
 	CreateAPIKey(ctx context.Context, channelID uint, req connector.APIKeyCreateRequest) (*connector.APIKey, error)
-	UpdateAPIKey(ctx context.Context, channelID uint, keyID int64, req connector.APIKeyUpdateRequest) (*connector.APIKey, error)
 	RevealAPIKey(ctx context.Context, channelID uint, keyID int64) (string, error)
 }
 
@@ -61,8 +60,9 @@ type Service struct {
 	upstream    config.UpstreamConfig
 	gatewayCfg  config.GatewayConfig
 
-	modelsCacheMu sync.Mutex
-	modelsCache   map[uint]modelsCacheEntry // keyed by group id
+	modelsCacheMu     sync.Mutex
+	modelsCache       map[uint]modelsCacheEntry // keyed by group id
+	routeKeyBindingMu sync.Mutex
 
 	// 源分组列表缓存（ListAPIKeyGroups 远程调用昂贵；列表接口不再实时拉，运行时/保存仍可复用缓存）
 	channelGroupsCacheMu sync.Mutex

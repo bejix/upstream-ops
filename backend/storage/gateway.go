@@ -2,12 +2,14 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"gorm.io/gorm/logger"
 )
 
 // ---------- GatewayProviders（直连渠道） ----------
@@ -310,6 +312,8 @@ func (r *GatewayKeys) AddQuotaUsed(id uint, amount float64) error {
 // GatewayRoutes 网关路由仓储。
 type GatewayRoutes struct{ db *gorm.DB }
 
+var ErrGatewayRouteChanged = errors.New("gateway route changed during key binding")
+
 // NewGatewayRoutes 构造网关路由仓储。
 func NewGatewayRoutes(db *gorm.DB) *GatewayRoutes { return &GatewayRoutes{db: db} }
 
@@ -332,6 +336,67 @@ func (r *GatewayRoutes) FindByID(id uint) (*GatewayRoute, error) {
 	return &item, nil
 }
 
+func SameGatewayRouteSource(left, right GatewayRoute) bool {
+	if left.NormalizeSourceKind() != right.NormalizeSourceKind() {
+		return false
+	}
+	if left.NormalizeSourceKind() == GatewayRouteSourceProvider {
+		return left.GatewayProviderID == right.GatewayProviderID
+	}
+	if left.SourceChannelID != right.SourceChannelID {
+		return false
+	}
+	if left.SourceGroupID != nil || right.SourceGroupID != nil {
+		return left.SourceGroupID != nil && right.SourceGroupID != nil &&
+			*left.SourceGroupID == *right.SourceGroupID
+	}
+	return strings.TrimSpace(left.SourceGroupName) == strings.TrimSpace(right.SourceGroupName)
+}
+
+func (r *GatewayRoutes) BindSourceKeyIfUnchanged(expected *GatewayRoute, keyID int64, keyName, keyCipher string) error {
+	if expected == nil || expected.ID == 0 {
+		return ErrGatewayRouteChanged
+	}
+	query := r.db.Session(&gorm.Session{Logger: r.db.Logger.LogMode(logger.Silent)}).Model(&GatewayRoute{}).Where(map[string]any{
+		"id":                  expected.ID,
+		"gateway_group_id":    expected.GatewayGroupID,
+		"source_channel_id":   expected.SourceChannelID,
+		"gateway_provider_id": expected.GatewayProviderID,
+		"source_group_id":     expected.SourceGroupID,
+		"source_api_key_id":   expected.SourceAPIKeyID,
+	})
+	for _, field := range []struct{ column, value string }{
+		{"source_kind", expected.SourceKind},
+		{"source_group_name", expected.SourceGroupName},
+		{"source_api_key_name", expected.SourceAPIKeyName},
+		{"source_api_key_cipher", expected.SourceAPIKeyCipher},
+	} {
+		comparison := "COALESCE(?, '') = ?"
+		if r.db.Dialector.Name() == "mysql" {
+			comparison = "BINARY COALESCE(?, '') = BINARY ?"
+		}
+		query = query.Where(clause.Expr{SQL: comparison, Vars: []any{clause.Column{Name: field.column}, field.value}})
+	}
+	if expected.UpdatedAt.IsZero() {
+		query = query.Where("updated_at IS NULL OR updated_at = ?", expected.UpdatedAt)
+	} else {
+		query = query.Where("updated_at = ?", expected.UpdatedAt)
+	}
+	result := query.Updates(map[string]any{
+		"source_api_key_id":     keyID,
+		"source_api_key_name":   keyName,
+		"source_api_key_cipher": keyCipher,
+		"updated_at":            time.Now(),
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrGatewayRouteChanged
+	}
+	return nil
+}
+
 // SaveForGroup 全量保存某组下的路由列表。
 //
 // 重要：尽量保留已有 route.ID（原地 Update），避免「删表重建」导致 usage 日志里的
@@ -341,7 +406,7 @@ func (r *GatewayRoutes) FindByID(id uint) (*GatewayRoute, error) {
 func (r *GatewayRoutes) SaveForGroup(groupID uint, list []GatewayRoute) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var existing []GatewayRoute
-		if err := tx.Where("gateway_group_id = ?", groupID).Find(&existing).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("gateway_group_id = ?", groupID).Find(&existing).Error; err != nil {
 			return err
 		}
 		byID := make(map[uint]GatewayRoute, len(existing))
@@ -372,10 +437,7 @@ func (r *GatewayRoutes) SaveForGroup(groupID uint, list []GatewayRoute) error {
 			normalizeGatewayRoute(&list[i])
 
 			// 保留已有上游密钥 / 暂停状态：来源未变时不丢
-			sameSource := hasPrev &&
-				prev.NormalizeSourceKind() == list[i].NormalizeSourceKind() &&
-				prev.SourceChannelID == list[i].SourceChannelID &&
-				prev.GatewayProviderID == list[i].GatewayProviderID
+			sameSource := hasPrev && SameGatewayRouteSource(prev, list[i])
 			if sameSource {
 				list[i].SourceAPIKeyID = prev.SourceAPIKeyID
 				list[i].SourceAPIKeyName = prev.SourceAPIKeyName
@@ -385,7 +447,6 @@ func (r *GatewayRoutes) SaveForGroup(groupID uint, list []GatewayRoute) error {
 				list[i].TempUnschedulableAt = prev.TempUnschedulableAt
 				list[i].TempUnschedulableRequestID = prev.TempUnschedulableRequestID
 				list[i].RecoverSuccessStreak = prev.RecoverSuccessStreak
-				list[i].CreatedAt = prev.CreatedAt
 			} else {
 				list[i].SourceAPIKeyID = 0
 				list[i].SourceAPIKeyName = ""
@@ -398,6 +459,7 @@ func (r *GatewayRoutes) SaveForGroup(groupID uint, list []GatewayRoute) error {
 			}
 
 			if hasPrev {
+				list[i].CreatedAt = prev.CreatedAt
 				if err := tx.Save(&list[i]).Error; err != nil {
 					return err
 				}

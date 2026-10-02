@@ -5,9 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 
-	"github.com/bejix/upstream-ops/backend/connector"
 	"github.com/bejix/upstream-ops/backend/storage"
 )
 
@@ -194,53 +192,22 @@ func (a *AdminService) SaveRoutes(groupID uint, inputs []RouteInput) ([]storage.
 // EnsureKeyRouteResult 单条路由 ensure 结果（失败跳过，不中断其它路由）。
 
 func (a *AdminService) EnsureRouteKeys(ctx context.Context, groupID uint) (*EnsureKeysResult, error) {
+	a.routeKeyBindingMu.Lock()
+	defer a.routeKeyBindingMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if _, err := a.Groups.FindByID(groupID); err != nil {
+		return nil, err
+	}
 	routes, err := a.Routes.ListByGroupID(groupID)
 	if err != nil {
 		return nil, err
 	}
 	results := make([]EnsureKeyRouteResult, len(routes))
-	if len(routes) == 0 {
-		list, err := a.Routes.ListByGroupID(groupID)
-		if err != nil {
-			return nil, err
-		}
-		return &EnsureKeysResult{Items: list, Routes: results}, nil
-	}
-
-	// 同名上游 Key 串行 ensure，避免并发 Create 裂变；不同 Key 可并行。
-	var keyLocks sync.Map // keyName -> *sync.Mutex
-	lockKeyName := func(name string) func() {
-		v, _ := keyLocks.LoadOrStore(name, &sync.Mutex{})
-		m := v.(*sync.Mutex)
-		m.Lock()
-		return m.Unlock
-	}
-
-	sem := make(chan struct{}, a.gatewayRuntime().RouteBatchConcurrency)
-	var wg sync.WaitGroup
 	for i := range routes {
-		i := i
-		r := &routes[i]
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-			case <-ctx.Done():
-				results[i] = EnsureKeyRouteResult{
-					RouteID:    r.ID,
-					SourceKind: r.NormalizeSourceKind(),
-					ChannelID:  r.SourceChannelID,
-					ProviderID: r.GatewayProviderID,
-					Error:      ctx.Err().Error(),
-				}
-				return
-			}
-			results[i] = a.ensureRouteKeyResult(ctx, groupID, r, lockKeyName)
-		}()
+		results[i] = a.ensureRouteKeyResult(ctx, groupID, &routes[i])
 	}
-	wg.Wait()
 
 	list, err := a.Routes.ListByGroupID(groupID)
 	if err != nil {
@@ -259,13 +226,10 @@ func (a *AdminService) EnsureRouteKeys(ctx context.Context, groupID uint) (*Ensu
 	return out, nil
 }
 
-// ensureRouteKeyResult 处理单条路由 ensure；lockKeyName 对相同稳定 Key 名加锁防并发创建。
-
 func (a *AdminService) ensureRouteKeyResult(
 	ctx context.Context,
 	groupID uint,
 	r *storage.GatewayRoute,
-	lockKeyName func(string) func(),
 ) EnsureKeyRouteResult {
 	rr := EnsureKeyRouteResult{
 		RouteID:    r.ID,
@@ -288,6 +252,17 @@ func (a *AdminService) ensureRouteKeyResult(
 		return rr
 	}
 	chName := ""
+	if !r.Enabled {
+		rr.Skipped = true
+		rr.SkipReason = "路由已停用"
+		return rr
+	}
+	if r.SourceAPIKeyID > 0 || strings.TrimSpace(r.SourceAPIKeyCipher) != "" {
+		rr.Skipped = true
+		rr.KeyName = r.SourceAPIKeyName
+		rr.SkipReason = "路由已绑定密钥"
+		return rr
+	}
 	if ch, e := a.Channels.FindByID(r.SourceChannelID); e == nil && ch != nil {
 		chName = ch.Name
 		rr.ChannelName = ch.Name
@@ -295,11 +270,8 @@ func (a *AdminService) ensureRouteKeyResult(
 	rr.Label = a.formatChannelGroupLabel(chName, r.SourceGroupName, r.SourceChannelID)
 	rr.KeyName = a.stableUpstreamKeyName(r.SourceChannelID, r.SourceGroupID, r.SourceGroupName)
 
-	if unlock := lockKeyName(rr.KeyName); unlock != nil {
-		defer unlock()
-	}
-	if err := a.ensureSourceAPIKey(ctx, groupID, r); err != nil {
-		rr.Error = err.Error()
+	if err := a.ensureSourceAPIKeyLocked(ctx, groupID, r); err != nil {
+		rr.Error = safeRouteKeyError(err)
 		return rr
 	}
 	rr.OK = true
@@ -323,82 +295,9 @@ func (a *AdminService) ensureRouteKeyResult(
 // 不再使用 upstream-ops-gw-g{组}-r{路由}（会按路由裂变）。
 
 func (a *AdminService) ensureSourceAPIKey(ctx context.Context, groupID uint, route *storage.GatewayRoute) error {
-	_ = groupID // 命名不再依赖网关组 ID，保留参数以兼容调用方
-	if route.NormalizeSourceKind() == storage.GatewayRouteSourceProvider {
-		return nil
-	}
-	sourceChannel, err := a.Channels.FindByID(route.SourceChannelID)
-	if err != nil {
-		return err
-	}
-	// 统一名：渠道 + 源分组；跨网关组共用
-	keyName := a.stableUpstreamKeyName(route.SourceChannelID, route.SourceGroupID, route.SourceGroupName)
-	legacyName := strings.TrimSpace(route.SourceAPIKeyName) // 旧版 g{组}-r{路由} 等，用于迁移复用
-
-	unlimitedQuota := boolPtr(sourceChannel.Type == storage.ChannelTypeNewAPI)
-	neverExpire := int64PtrIf(sourceChannel.Type == storage.ChannelTypeNewAPI, -1)
-
-	// 优先按统一名搜索
-	page, err := a.ChannelAPI.ListAPIKeys(ctx, route.SourceChannelID, connector.APIKeyQuery{
-		Page: 1, PageSize: 100, Search: keyName,
-	})
-	if err != nil {
-		return err
-	}
-	var key *connector.APIKey
-	key = a.findAPIKeyByName(page.Items, keyName)
-
-	// 全量页再找：统一名 / 路由上已记的 key id / 旧名
-	if key == nil {
-		page, err = a.ChannelAPI.ListAPIKeys(ctx, route.SourceChannelID, connector.APIKeyQuery{Page: 1, PageSize: 100})
-		if err != nil {
-			return err
-		}
-		key = a.findAPIKeyByName(page.Items, keyName)
-		if key == nil && route.SourceAPIKeyID > 0 {
-			key = a.findAPIKeyByID(page.Items, route.SourceAPIKeyID)
-		}
-		if key == nil && legacyName != "" && legacyName != keyName {
-			key = a.findAPIKeyByName(page.Items, legacyName)
-		}
-	}
-
-	groupName := strings.TrimSpace(route.SourceGroupName)
-	if key != nil {
-		// 复用已有 Key：统一改名为稳定名，并同步源分组绑定
-		name := keyName
-		updated, err := a.ChannelAPI.UpdateAPIKey(ctx, route.SourceChannelID, key.ID, connector.APIKeyUpdateRequest{
-			Name:           &name,
-			Group:          stringPtrOrNil(groupName),
-			GroupID:        route.SourceGroupID,
-			UnlimitedQuota: unlimitedQuota,
-			ExpiredTime:    neverExpire,
-		})
-		if err != nil {
-			return err
-		}
-		key = updated
-	} else {
-		key, err = a.ChannelAPI.CreateAPIKey(ctx, route.SourceChannelID, connector.APIKeyCreateRequest{
-			Name:           keyName,
-			Group:          groupName,
-			GroupID:        route.SourceGroupID,
-			UnlimitedQuota: unlimitedQuota,
-			ExpiredTime:    neverExpire,
-		})
-		if err != nil {
-			return err
-		}
-	}
-	secret, err := a.ChannelAPI.RevealAPIKey(ctx, route.SourceChannelID, key.ID)
-	if err != nil {
-		return err
-	}
-	cipherText, err := a.Cipher.Encrypt(secret)
-	if err != nil {
-		return err
-	}
-	return a.Routes.UpdateSourceKey(route.ID, key.ID, keyName, cipherText)
+	a.routeKeyBindingMu.Lock()
+	defer a.routeKeyBindingMu.Unlock()
+	return a.ensureSourceAPIKeyLocked(ctx, groupID, route)
 }
 
 // ClearRoutePause 清除路由暂停。
