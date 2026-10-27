@@ -44,6 +44,11 @@ type Service struct {
 	// 该集合需要分页拉取上游全部密钥计算，monitor 每次刷新和前端切页都会用到，
 	// 缓存以 channelID 为 key（TTL 见 apiKeyGroupSetTTL）。
 	apiKeyGroupSetCache sync.Map
+
+	// catalogCache 缓存"上游模型目录"（分组 → 模型归属）。
+	// 一次请求可能带上百个模型，切分组时不应重复打上游；TTL 见 catalogTTL。
+	catalogCacheMu sync.Mutex
+	catalogCache   map[uint]*catalogCacheEntry
 }
 
 func NewService(
@@ -61,6 +66,7 @@ func NewService(
 		Rates:        rates,
 		MonitorLogs:  monitorLogs,
 		Cipher:       cipher,
+		catalogCache: make(map[uint]*catalogCacheEntry),
 	}
 }
 

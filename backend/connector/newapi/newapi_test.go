@@ -553,6 +553,9 @@ func TestSubscriptionUnsupported(t *testing.T) {
 
 func TestListAPIKeys(t *testing.T) {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"quota_display_type":"USD","price":1}}`))
+	})
 	mux.HandleFunc("/api/user/self/groups", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"default":{"ratio":1.25,"desc":"默认分组"}}}`))
 	})
@@ -583,6 +586,9 @@ func TestListAPIKeys(t *testing.T) {
 
 func TestListAPIKeyGroups(t *testing.T) {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"quota_display_type":"USD","price":1}}`))
+	})
 	mux.HandleFunc("/api/user/self/groups", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"default":{"ratio":1.25,"desc":"默认分组"},"auto":{"ratio":"自动","desc":"跳过"}}}`))
 	})
@@ -835,4 +841,100 @@ func TestCreateAPIKeyFallsBackToListWhenSearchMisses(t *testing.T) {
 
 func strPtr(v string) *string {
 	return &v
+}
+
+func TestNewAPIGroupRatioScale(t *testing.T) {
+	cases := []struct {
+		name   string
+		status newAPIStatus
+		want   float64
+	}{
+		{"USD 原样", newAPIStatus{QuotaDisplayType: "USD", Price: 7}, 1},
+		{"未配置原样", newAPIStatus{Price: 7}, 1},
+		{"CNY 乘 price", newAPIStatus{QuotaDisplayType: "CNY", Price: 0.1}, 0.1},
+		{"CNY 小写", newAPIStatus{QuotaDisplayType: "cny", Price: 0.1}, 0.1},
+		{"CUSTOM 用自定义汇率", newAPIStatus{QuotaDisplayType: "CUSTOM", Price: 7, CustomCurrencyExchangeRate: 0.5}, 0.5},
+		{"CNY 但 price 缺失退回 1", newAPIStatus{QuotaDisplayType: "CNY", Price: 0}, 1},
+		{"CUSTOM 汇率缺失退回 1", newAPIStatus{QuotaDisplayType: "CUSTOM", CustomCurrencyExchangeRate: 0}, 1},
+	}
+	for _, tc := range cases {
+		if got := newAPIGroupRatioScale(tc.status); got != tc.want {
+			t.Errorf("%s: scale = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// GetRates 要把分组倍率换算成站点展示口径（quota_display_type=CNY 时乘 price），
+// 否则监控里看到的数字和站点 UI 差一个数量级。
+func TestGetRatesAppliesDisplayCurrencyScale(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"price":0.1,"quota_display_type":"CNY","custom_currency_exchange_rate":0.1}}`))
+	})
+	mux.HandleFunc("/api/user/self/groups", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"claude":{"ratio":4.55,"desc":"kiro"},"gemini":{"ratio":18},"国模":{"ratio":0.415}}}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rates, err := New().GetRates(context.Background(), &connector.Channel{SiteURL: srv.URL}, nil)
+	if err != nil {
+		t.Fatalf("GetRates: %v", err)
+	}
+	got := make(map[string]float64, len(rates))
+	for _, r := range rates {
+		got[r.ModelName] = r.Ratio
+	}
+	want := map[string]float64{"claude": 0.455, "gemini": 1.8, "国模": 0.0415}
+	for name, w := range want {
+		if got[name] != w {
+			t.Errorf("%s ratio = %v, want %v", name, got[name], w)
+		}
+	}
+}
+
+// quota_display_type=USD 时倍率必须保持原样，不能被 price 影响。
+func TestGetRatesKeepsRawRatioForUSDDisplay(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"price":7.3,"quota_display_type":"USD"}}`))
+	})
+	mux.HandleFunc("/api/user/self/groups", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"default":{"ratio":0.06}}}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rates, err := New().GetRates(context.Background(), &connector.Channel{SiteURL: srv.URL}, nil)
+	if err != nil {
+		t.Fatalf("GetRates: %v", err)
+	}
+	if len(rates) != 1 || rates[0].Ratio != 0.06 {
+		t.Fatalf("rates = %+v, want default=0.06", rates)
+	}
+}
+
+// 网关选路用的 ListAPIKeyGroups 必须和倍率采集用同一套展示口径，
+// 否则监控页的倍率和网关实际计费的倍率会差一个系数。
+func TestListAPIKeyGroupsAppliesDisplayCurrencyScale(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"price":0.1,"quota_display_type":"CNY","custom_currency_exchange_rate":0.1}}`))
+	})
+	mux.HandleFunc("/api/user/self/groups", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"claude":{"ratio":4.55,"desc":"kiro"}}}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	groups, err := New().ListAPIKeyGroups(context.Background(), &connector.Channel{SiteURL: srv.URL}, &connector.AuthSession{
+		Cookie: "session=1",
+		UserID: "7",
+	})
+	if err != nil {
+		t.Fatalf("ListAPIKeyGroups: %v", err)
+	}
+	if len(groups) != 1 || groups[0].Name != "claude" || groups[0].Ratio != 0.455 {
+		t.Fatalf("groups = %#v, want claude=0.455", groups)
+	}
 }

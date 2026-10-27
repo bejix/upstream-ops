@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>上游分组 · 分组内模型 原型（WorldClawPro / xem / 码少）</title>
+<style>
+:root{
+  --bg:oklch(1 0 0);--fg:oklch(.145 0 0);--card:oklch(1 0 0);
+  --muted:oklch(.968 0 0);--mfg:oklch(.556 0 0);--bd:oklch(.92 0 0);
+  --primary:oklch(.205 0 0);--pfig:oklch(.985 0 0);
+  --brand:oklch(.546 .215 262.881);--danger:oklch(.637 .237 25.331);
+  --hover:oklch(.975 0 0);--warn:#BA7517;--ok:#1D9E75;
+}
+.dark{
+  --bg:oklch(.145 0 0);--fg:oklch(.985 0 0);--card:oklch(.145 0 0);
+  --muted:oklch(.269 0 0);--mfg:oklch(.708 0 0);--bd:oklch(.269 0 0);
+  --primary:oklch(.985 0 0);--pfig:oklch(.205 0 0);
+  --brand:oklch(.623 .214 259.815);--danger:oklch(.645 .246 16.439);
+  --hover:rgba(255,255,255,.03);--warn:#EF9F27;--ok:#5DCAA5;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-size:14px;padding:20px 22px 50px;
+  font-family:"Geist",system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased}
+.mono{font-family:ui-monospace,Menlo,monospace}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+.hd{max-width:1220px;margin:0 auto 15px;display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}
+.hd h1{margin:0;font-size:17px;font-weight:500;letter-spacing:.01em}
+.hd .sub{margin:5px 0 0;font-size:12px;color:var(--mfg);line-height:19px;max-width:800px}
+.hd .r{margin-left:auto;display:flex;gap:7px}
+.btn{font-family:inherit;font-size:12px;padding:6px 11px;border-radius:7px;cursor:pointer;
+  border:1px solid var(--bd);background:var(--card);color:var(--fg);display:inline-flex;align-items:center;gap:5px}
+.btn:hover{background:var(--muted)}
+.btn.on{border-color:var(--brand);color:var(--brand);background:color-mix(in oklab,var(--brand) 8%,transparent)}
+.btn.pri{background:var(--primary);color:var(--pfig);border-color:var(--primary)}
+
+.tabs{max-width:1220px;margin:0 auto 14px;display:flex;gap:2px;border-bottom:1px solid var(--bd);flex-wrap:wrap}
+.tab{font-family:inherit;font-size:12.5px;padding:8px 13px;border:0;background:transparent;color:var(--mfg);
+  cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;display:inline-flex;align-items:center;gap:6px}
+.tab:hover{color:var(--fg)}
+.tab.on{color:var(--fg);border-bottom-color:var(--fg);font-weight:500}
+.tab .ty{font-size:9.5px;line-height:15px;padding:0 4px;border-radius:3px;border:1px solid var(--bd);color:var(--mfg);font-weight:400}
+.tab .ty.n{border-color:color-mix(in oklab,var(--brand) 45%,transparent);color:var(--brand)}
+
+.wrap{max-width:1220px;margin:0 auto;display:grid;grid-template-columns:1fr 290px;gap:16px;align-items:start}
+@media(max-width:1080px){.wrap{grid-template-columns:1fr}.side{display:none}}
+.card{border:1px solid var(--bd);border-radius:12px;background:var(--card);overflow:hidden}
+.cb{padding:14px 16px}
+.ctop{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.cname{font-size:14.5px;font-weight:500}
+.pill{font-size:10px;line-height:17px;padding:0 6px;border-radius:5px;border:1px solid var(--bd);color:var(--mfg)}
+.pill.brand{background:color-mix(in oklab,var(--brand) 12%,transparent);color:var(--brand);border-color:color-mix(in oklab,var(--brand) 32%,transparent)}
+.site{font-size:10.5px;color:var(--mfg)}
+.kpi{margin-left:auto;display:flex;gap:15px}
+.kpi .k{font-size:10px;color:var(--mfg);text-align:right}
+.kpi .v{font-size:13px;font-weight:500;font-variant-numeric:tabular-nums;margin-top:2px;text-align:right}
+
+.sec{margin-top:13px;border-top:1px solid var(--bd);padding-top:11px}
+.sech{display:flex;align-items:center;gap:7px;margin-bottom:8px;flex-wrap:wrap}
+.sech .t{font-size:11px;color:var(--mfg)}
+.warnline{font-size:10.5px;color:var(--warn);display:inline-flex;align-items:center;gap:3px}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:5px;font-size:11px;
+  border:1px solid var(--bd);cursor:pointer;background:transparent;color:var(--fg);font-family:inherit;
+  transition:background .12s,border-color .12s;max-width:100%}
+.chip:hover{background:var(--muted)}
+.chip .r{font-size:9.5px;font-variant-numeric:tabular-nums;padding:0 3px;border-radius:3px;
+  background:color-mix(in oklab,var(--brand) 14%,transparent);color:var(--brand);flex:0 0 auto}
+.chip .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip.on{border-color:color-mix(in oklab,var(--brand) 55%,transparent);
+  background:color-mix(in oklab,var(--brand) 10%,transparent);font-weight:500}
+.chip .dot{width:5px;height:5px;border-radius:99px;flex:0 0 auto;background:var(--ok)}
+.chip .dot.restricted{background:var(--warn)}
+
+.exp{margin-top:10px;border:1px solid color-mix(in oklab,var(--brand) 28%,var(--bd));border-radius:9px;
+  background:color-mix(in oklab,var(--brand) 3%,transparent);overflow:hidden}
+.exh{padding:9px 11px;border-bottom:1px solid var(--bd);background:color-mix(in oklab,var(--brand) 5%,transparent)}
+.exh .r1{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.exh .gn{font-size:12.5px;font-weight:500}
+.exh .ds{font-size:11px;color:var(--mfg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px}
+.exh .meta{margin-left:auto;display:flex;gap:10px;font-size:10.5px;color:var(--mfg);flex-wrap:wrap}
+.exh .meta b{color:var(--fg);font-weight:500;font-variant-numeric:tabular-nums}
+.exh .r2{margin-top:6px;display:flex;gap:5px;flex-wrap:wrap}
+.tagx{font-size:9.5px;line-height:15px;padding:0 5px;border-radius:3px;border:1px solid var(--bd);color:var(--mfg)}
+.tagx.on{border-color:color-mix(in oklab,var(--brand) 40%,transparent);color:var(--brand)}
+.tagx.warn{border-color:color-mix(in oklab,var(--warn) 45%,transparent);color:var(--warn)}
+.caveat{padding:7px 11px;font-size:10.5px;line-height:16px;color:var(--warn);
+  background:color-mix(in oklab,var(--warn) 9%,transparent);border-bottom:1px solid var(--bd)}
+.caveat b{font-weight:500}
+table{width:100%;border-collapse:collapse;table-layout:fixed}
+th{font-size:10px;font-weight:500;color:var(--mfg);text-align:left;padding:6px 10px;
+  border-bottom:1px solid var(--bd);white-space:nowrap}
+td{padding:6px 10px;border-bottom:1px solid color-mix(in oklab,var(--bd) 50%,transparent);font-size:11.5px}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--hover)}
+.mn{display:flex;align-items:center;gap:5px;min-width:0}
+.mn .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.num{font-variant-numeric:tabular-nums;text-align:right}
+.dim{color:var(--mfg)}
+.mini{font-size:9px;line-height:14px;padding:0 4px;border-radius:3px;border:1px solid var(--bd);color:var(--mfg);flex:0 0 auto}
+.mini.sh{border-color:color-mix(in oklab,var(--brand) 40%,transparent);color:var(--brand)}
+.mini.paid{border-color:color-mix(in oklab,var(--warn) 45%,transparent);color:var(--warn)}
+.exf{display:flex;align-items:center;gap:8px;padding:7px 11px;border-top:1px solid var(--bd);font-size:11px}
+.more{margin-left:auto;font-family:inherit;font-size:11px;background:transparent;border:0;color:var(--brand);
+  cursor:pointer;display:inline-flex;align-items:center;gap:3px}
+.msg{padding:13px 12px;font-size:11.5px;line-height:19px;color:var(--mfg)}
+.msg b{color:var(--fg);font-weight:500}
+.msg .acts{margin-top:9px;display:flex;gap:7px}
+
+.side{position:sticky;top:16px;display:flex;flex-direction:column;gap:11px}
+.pn{border:1px solid var(--bd);border-radius:11px;background:var(--card);padding:12px 13px}
+.pn h3{margin:0 0 7px;font-size:10.5px;font-weight:500;color:var(--mfg);letter-spacing:.02em}
+.pn .kv{display:flex;justify-content:space-between;font-size:11px;padding:2.5px 0;gap:8px}
+.pn .kv .k{color:var(--mfg);flex:0 0 auto}
+.pn .kv .v{text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.note{font-size:10.5px;line-height:17px;color:var(--mfg);margin:0}
+.note b{color:var(--fg);font-weight:500}
+.note code{font-family:ui-monospace,Menlo,monospace;font-size:10px;background:var(--muted);padding:0 3px;border-radius:3px}
+.dglist{display:flex;flex-wrap:wrap;gap:4px}
+.dglist button{font-family:inherit;font-size:10px;padding:3px 7px;border:1px solid var(--bd);border-radius:5px;
+  background:transparent;color:var(--mfg);cursor:pointer}
+.dglist button.on{background:var(--primary);color:var(--pfig);border-color:var(--primary)}
+
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .18s;z-index:40}
+.ov.on{opacity:1;pointer-events:auto}
+.mod{position:fixed;left:50%;top:50%;transform:translate(-50%,-48%) scale(.985);width:min(920px,95vw);max-height:86vh;
+  background:var(--card);border:1px solid var(--bd);border-radius:13px;z-index:50;display:flex;flex-direction:column;
+  opacity:0;pointer-events:none;transition:opacity .18s,transform .18s}
+.mod.on{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}
+.mh{padding:14px 16px 11px;border-bottom:1px solid var(--bd)}
+.mh .r1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.mh h2{margin:0;font-size:15px;font-weight:500}
+.mh p{margin:4px 0 0;font-size:11px;color:var(--mfg);line-height:17px}
+.mt{display:flex;gap:7px;margin-top:10px;flex-wrap:wrap}
+.mt input{flex:1;min-width:160px;font-family:inherit;font-size:11.5px;padding:6px 9px;border:1px solid var(--bd);
+  border-radius:6px;background:var(--bg);color:var(--fg);outline:none}
+.mt input:focus{border-color:var(--brand)}
+.mb{overflow:auto;flex:1;padding:0 16px 10px}
+.mf{padding:9px 16px;border-top:1px solid var(--bd);display:flex;align-items:center;gap:8px}
+.mf .info{font-size:11px;color:var(--mfg);margin-right:auto}
+.pg{display:flex;gap:3px;align-items:center}
+.pg button{font-family:inherit;font-size:11px;min-width:24px;height:24px;border:1px solid var(--bd);border-radius:5px;
+  background:transparent;color:var(--fg);cursor:pointer;padding:0 5px}
+.pg button.on{background:var(--primary);color:var(--pfig);border-color:var(--primary)}
+.pg button:disabled{opacity:.35;cursor:default}
+</style>
+</head>
+<body>
+<h2 class="sr-only">上游分组内模型信息原型，基于 WorldClawPro、xem、码少三个渠道的真实接口数据</h2>
+
+<div class="hd">
+  <div>
+    <h1>上游分组 · 分组内模型</h1>
+    <p class="sub">WorldClawPro / xem / 码少 三渠道真实数据。凭证从 <span class="mono">channels.password_cipher</span> 解密后带上 <span class="mono">New-Api-User</span> 直连 <span class="mono">/api/pricing</span>，无一处编造。</p>
+  </div>
+  <div class="r"><button class="btn" id="th">浅色</button></div>
+</div>
+
+<div class="tabs" id="tabs"></div>
+<div class="wrap">
+  <div id="host"></div>
+  <aside class="side">
+    <div class="pn"><h3>数据来源</h3><div id="src"></div></div>
+    <div class="pn"><h3>降级演示</h3><div class="dglist" id="dgBtns"></div>
+      <p class="note" style="margin-top:8px" id="dgNote"></p></div>
+    <div class="pn"><h3>本轮的实测发现</h3>
+      <p class="note" id="findings"></p></div>
+  </aside>
+</div>
+
+<div class="ov" id="ov"></div><div class="mod" id="mod"></div>
+
+<script>
+const RD={"9":{"id":9,"name":"WorldClawPro","site":"https://worldclawpro.ai","type":"newapi","raw_bytes":3533,"usable_group":{"GM":"guom","default":"用户分组","特价":"特价"},"group_ratio":{"GM":0.05,"特价":0.04},"auto_groups":[],"vendors":{"-1011":"Moonshot","1":"DeepSeek","2":"OpenAI","3":"讯飞","4":"Anthropic","5":"智谱","6":"阿里巴巴"},"has_marketplace":false,"models":[{"n":"codex-auto-review","g":["特价"],"v":null,"t":null,"qt":0,"mr":0.5,"cr":6,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"glm-5.3-flash","g":["GM"],"v":5,"t":null,"qt":0,"mr":0.4,"cr":3.5,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"kimi-k3.1-pro","g":["GM"],"v":-1011,"t":null,"qt":0,"mr":37.5,"cr":1,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"tier(\"base\", p * 13 + c * 68 + cr * 1.3 + cc * 13 + cc1h * 26)"},{"n":"deepseek-v4.1-flash","g":["GM"],"v":1,"t":null,"qt":0,"mr":0.5,"cr":4,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"(tier(\"base\", p * 1 + c * 4 + cr * 0.02)) * (hour(\"Asia/Shanghai\") >= 9 && hour(\"Asia/Shanghai\") < 12 && weekday(\"Asia/Shanghai\") >= 1 && weekday(\"Asia/Shanghai\") < 6 ? 2 : 1) * (hour(\"Asia/Shanghai\") >= 14 && hour(\"Asia/Shanghai\") < 18 && weekday(\"Asia/Shanghai\") >= 1 && weekday(\"Asia/Shanghai\") < 6 ? 2 : 1)"},{"n":"gpt-5.6-sol","g":["特价"],"v":2,"t":null,"qt":0,"mr":2.5,"cr":6,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"len < 272000 ? tier(\"默认\", p * 5 + c * 30 + cr * 0.5 + cc * 6.25) : len >= 272000 ? tier(\"超过272K双倍计费\", p * 10 + c * 45 + cr * 1 + cc * 12.5) : tier(\"原价计费\", p * 5 + c * 30 + cr * 0.5 + cc * 6.25)"},{"n":"gpt-6.1-sol","g":["特价"],"v":2,"t":null,"qt":0,"mr":37.5,"cr":2,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"len < 272000 ? tier(\"默认\", p * 2 + c * 10 + cr * 0.2 + cc * 2.5) : len >= 272000 ? tier(\"超过272K双倍计费\", p * 4 + c * 15 + cr * 0.4 + cc * 5) : tier(\"原价计费\", p * 2 + c * 10 + cr * 0.2 + cc * 2.5)"},{"n":"gpt-6-astra","g":["特价"],"v":2,"t":null,"qt":0,"mr":5,"cr":5,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"len <= 272000 ? tier(\"standard\", p * 10 + cr * 1 + cc * 12.5 + c * 50) : tier(\"long_context\", p * 20 + cr * 2 + cc * 25 + c * 75)"}]},"14":{"id":14,"name":"xem","site":"https://ai.xem8k5.top","type":"newapi","raw_bytes":24010,"usable_group":{"claude":"kiro企业","claude-max":"可外接,禁蒸馏","default":"默认分组","gemini":"反重力gemini","gemini4":"gemini4","gpt-fast":"该分组fast透传，vip用户使用以vip组价格为基础计算倍率","gpt-image":"image","gpt-pro":"0.4倍率纯血pro号池","grok":"grok heavy池","grok-image":"grok image","grok-video":"grok video","plus":"team/plus炸弹车","国模":"国产模型"},"group_ratio":{"claude":4.55,"claude-max":12.55,"default":0.2,"gemini":18,"gemini4":3,"gpt-fast":7.5,"gpt-image":0.25,"gpt-pro":3,"grok":1.25,"grok-image":12.5,"grok-video":12.5,"plus":0.7,"国模":0.415},"auto_groups":["plus"],"vendors":{"32":"Abacus","12":"Anthropic","15":"Cohere","7":"DeepSeek","21":"GitHub Models","3":"Google","39":"Groq","27":"Helicone","40":"iFlow","19":"Inference","24":"Kilo Gateway","18":"LLM Gateway","5":"Meta","14":"Mistral","4":"Moonshot","20":"NanoGPT","36":"NovitaAI","16":"Nvidia","1":"OpenAI","29":"OpenCode Zen","22":"OpenRouter","31":"Perplexity Agent","26":"QiHang","37":"Qiniu","33":"SAP AI Core","30":"Scaleway","42":"SiliconFlow (China)","41":"STACKIT","35":"Tencent Coding Plan (China)","23":"Venice AI","25":"Vercel AI Gateway","17":"Vivgrid","28":"Weights & Biases","11":"xAI","43":"xem","38":"Xiaomi","34":"ZenMux","44":"字节跳动","8":"智谱","9":"百度","10":"腾讯","2":"讯飞","6":"阿里巴巴","13":"零一万物"},"has_marketplace":false,"models":[{"n":"z-ai/glm-5.3-flash","g":["default"],"v":8,"t":null,"qt":0,"mr":0.5,"cr":1,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"gpt-5.6-terra","g":["gpt-pro","vip","gpt-fast","plus"],"v":1,"t":null,"qt":0,"mr":1,"cr":6,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"len < 272000 ? tier(\"base\", p * 2.5 + c * 15 + cr * 0.25 + cc * 3.125) : len >= 272000 ? tier(\"272K+\", p * 5 + c * 22.5 + cr * 0.5 + cc * 6.25) : tier(\"原价\", p * 2.5 + c * 15 + cr * 0.25 + cc * 3.125)"},{"n":"gpt-image-2.5-flare","g":["gpt-image","vip","gpt-pro"],"v":1,"t":null,"qt":1,"mr":0,"cr":0,"mp":1,"ep":["image-generation","openai"],"bm":null,"be":null},{"n":"claude-opus-4-7","g":["claude-max","claude"],"v":12,"t":null,"qt":0,"mr":2.5,"cr":5,"mp":0,"ep":["anthropic","openai"],"bm":null,"be":null},{"n":"claude-opus-5","g":["claude-max","claude"],"v":12,"t":null,"qt":0,"mr":2.5,"cr":5,"mp":0,"ep":["anthropic","openai"],"bm":null,"be":null},{"n":"claude-sonnet-5-5","g":["claude-max","claude"],"v":12,"t":null,"qt":0,"mr":1,"cr":5,"mp":0,"ep":["anthropic","openai"],"bm":null,"be":null},{"n":"gemini-4-argon-high","g":["gemini4"],"v":3,"t":null,"qt":0,"mr":2,"cr":5,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"glm-5v-turbo","g":["国模"],"v":8,"t":null,"qt":0,"mr":37.5,"cr":3.333333333333,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"grok-imagine-video-1.5-720p","g":["grok-video"],"v":11,"t":null,"qt":1,"mr":0,"cr":0,"mp":0.14,"ep":["openai","openai-response"],"bm":null,"be":null},{"n":"claude-haiku-5-5","g":["claude-max"],"v":12,"t":null,"qt":0,"mr":37.5,"cr":1,"mp":0,"ep":["anthropic","openai"],"bm":"tiered_expr","be":"len < 100000 ? tier(\"短上下文\", p * 0.1 + c * 0.5 + cr * 0.01 + cc * 0.125) : len >= 100000 ? tier(\"长上下文\", p * 0.5 + c * 2.5 + cr * 0.05 + cc * 0.625) : tier(\"?\", p * 0.5 + c * 2.5 + cr * 0.05 + cc * 0.625)"},{"n":"codex-auto-review","g":["vip","gpt-fast","gpt-pro"],"v":1,"t":null,"qt":0,"mr":1.25,"cr":6,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"glm-5.1","g":["国模"],"v":8,"t":null,"qt":0,"mr":0.7,"cr":3.142857142857,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"minimax-m3","g":["国模"],"v":null,"t":null,"qt":0,"mr":1.05,"cr":4,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"kimi-k3-1","g":["国模"],"v":4,"t":null,"qt":0,"mr":10,"cr":5,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"kimi-k3.1-pro","g":["国模"],"v":4,"t":null,"qt":0,"mr":6.5,"cr":5.230769230769,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"gemini-3-pro-image-preview","g":["gemini"],"v":3,"t":null,"qt":1,"mr":0,"cr":0,"mp":0.0201,"ep":["image-generation","openai"],"bm":null,"be":null},{"n":"deepseek-v4.1-flash","g":["国模"],"v":7,"t":null,"qt":0,"mr":1,"cr":4,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"glm-5.3","g":["国模"],"v":8,"t":null,"qt":0,"mr":4,"cr":3.5,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"grok-imagine-video-720p","g":["grok-video"],"v":11,"t":null,"qt":1,"mr":0,"cr":0,"mp":0.07,"ep":["openai","openai-response"],"bm":null,"be":null},{"n":"grok-imagine-video-1.5-480p","g":["grok-video"],"v":11,"t":null,"qt":1,"mr":0,"cr":0,"mp":0.08,"ep":["openai","openai-response"],"bm":null,"be":null},{"n":"grok-imagine-video-1.5-1080p","g":["grok-video"],"v":11,"t":null,"qt":1,"mr":0,"cr":0,"mp":0.25,"ep":["openai","openai-response"],"bm":null,"be":null},{"n":"hy4-preview-exp","g":["国模"],"v":null,"t":null,"qt":0,"mr":37.5,"cr":1,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"claude-opus-5-thinking","g":["claude"],"v":12,"t":null,"qt":0,"mr":37.5,"cr":1,"mp":0,"ep":["anthropic","openai"],"bm":null,"be":null},{"n":"moonshotai/kimi-k2.6","g":["default"],"v":4,"t":null,"qt":0,"mr":0.5,"cr":1,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"deepseek-ai/deepseek-v4.1-flash","g":["default"],"v":7,"t":null,"qt":0,"mr":0.5,"cr":1,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"gpt-6.1-sol","g":["gpt-pro","vip","gpt-fast","plus"],"v":1,"t":null,"qt":0,"mr":1,"cr":5,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"len < 272000 ? tier(\"短上下文\", p * 2 + c * 10 + cr * 0.2 + cc * 2.5) : len >= 272000 ? tier(\"长上下文\", p * 4 + c * 15 + cr * 0.4 + cc * 5) : tier(\"触发不了的兜底\", p * 4 + c * 15 + cr * 0.4 + cc * 5)"},{"n":"gpt-image-2.5","g":["gpt-image","vip","gpt-pro"],"v":1,"t":null,"qt":1,"mr":0,"cr":0,"mp":1,"ep":["image-generation","openai"],"bm":null,"be":null},{"n":"gemini-3.8-flash-low","g":["gemini"],"v":3,"t":null,"qt":0,"mr":0.1125,"cr":5,"mp":0,"ep":["gemini","openai"],"bm":null,"be":null},{"n":"grok-imagine-image-2.0","g":["grok-image"],"v":11,"t":null,"qt":1,"mr":0,"cr":0,"mp":0.01,"ep":["image-generation","openai"],"bm":null,"be":null},{"n":"minimax-m3.1-flash","g":["国模"],"v":null,"t":null,"qt":0,"mr":0.5,"cr":4,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"claude-sonnet-4-5-20250929","g":["claude"],"v":12,"t":"Reasoning,Tools,Files,Vision,200K","qt":0,"mr":1.5,"cr":5,"mp":0,"ep":["anthropic","openai"],"bm":null,"be":null},{"n":"openai/gpt-oss-20b","g":["default"],"v":1,"t":"Tools,131.1K","qt":0,"mr":0.5,"cr":1,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"grok-imagine-video-1.5","g":["grok-video"],"v":11,"t":null,"qt":1,"mr":0,"cr":0,"mp":0.25,"ep":["openai","openai-response"],"bm":null,"be":null},{"n":"glm-5.2","g":["国模"],"v":8,"t":null,"qt":0,"mr":0.5,"cr":1,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"vol-haonuhai","g":["default"],"v":null,"t":null,"qt":0,"mr":0,"cr":1,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"gpt-5.6","g":["plus","gpt-pro","vip"],"v":1,"t":null,"qt":0,"mr":37.5,"cr":8,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"gemini-3-flash","g":["gemini"],"v":3,"t":null,"qt":0,"mr":0.075,"cr":6,"mp":0,"ep":["gemini","openai"],"bm":null,"be":null},{"n":"mimo-v2.6-pro","g":["国模"],"v":null,"t":null,"qt":0,"mr":1.5,"cr":2,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"grok-imagine-video-480p","g":["grok-video"],"v":11,"t":null,"qt":1,"mr":0,"cr":0,"mp":0.05,"ep":["openai","openai-response"],"bm":null,"be":null},{"n":"grok-4.6","g":["grok"],"v":11,"t":null,"qt":0,"mr":1,"cr":3,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"len < 200000 ? tier(\"短上下文\", p * 2 + c * 6 + cr * 0.5) : len >= 200000 ? tier(\"长上下文\", p * 4 + c * 12 + cr * 1) : tier(\"tier_3\", p * 2 + c * 6 + cr * 0.5)"},{"n":"gpt-reserve","g":["gpt-fast"],"v":1,"t":null,"qt":0,"mr":0.1,"cr":6,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"len < 272000 ? tier(\"base\", p * 0.2 + c * 1.2 + cr * 0.02 + cc * 1.25) : len >= 272000 ? tier(\"272K+\", p * 0.4 + c * 1.8 + cr * 0.04 + cc * 2.5) : tier(\"原价\", p * 1 + c * 6 + cr * 0.1 + cc * 1.25)"},{"n":"step-5-preview","g":["国模"],"v":null,"t":null,"qt":0,"mr":3.5,"cr":2.857142857143,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"deepseek-v4-pro","g":["国模"],"v":7,"t":null,"qt":0,"mr":4.5,"cr":3,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"hy4-preview-ctrl","g":["国模"],"v":null,"t":null,"qt":0,"mr":37.5,"cr":1,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"google/gemma-4-31b-it","g":["default"],"v":3,"t":null,"qt":0,"mr":0.5,"cr":1,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"claude-sonnet-5","g":["claude-max","claude"],"v":12,"t":null,"qt":0,"mr":1.5,"cr":5,"mp":0,"ep":["anthropic","openai"],"bm":null,"be":null},{"n":"stepfun-ai/step-5-preview","g":["default"],"v":null,"t":null,"qt":0,"mr":37.5,"cr":1,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"gemini-3.8-flash-tiered","g":["gemini"],"v":3,"t":null,"qt":0,"mr":37.5,"cr":4,"mp":0,"ep":["gemini","openai"],"bm":null,"be":null},{"n":"gemini-3.8-flash-high","g":["gemini"],"v":3,"t":null,"qt":0,"mr":0.1125,"cr":5,"mp":0,"ep":["gemini","openai"],"bm":null,"be":null},{"n":"gemini-4-argon","g":["gemini4"],"v":3,"t":null,"qt":0,"mr":2,"cr":5,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"claude-sonnet-4","g":["claude"],"v":12,"t":null,"qt":0,"mr":37.5,"cr":5,"mp":0,"ep":["anthropic","openai"],"bm":null,"be":null},{"n":"gpt-image-2","g":["gpt-image","vip","gpt-pro"],"v":1,"t":null,"qt":1,"mr":0,"cr":0,"mp":1,"ep":["openai","openai-response","image-generation"],"bm":null,"be":null},{"n":"claude-sonnet-4-5","g":["claude-max","claude"],"v":12,"t":"Reasoning,Tools,Files,Vision,1M","qt":0,"mr":37.5,"cr":5,"mp":0,"ep":["anthropic","openai"],"bm":null,"be":null},{"n":"grok-4.5","g":["grok"],"v":11,"t":null,"qt":0,"mr":1,"cr":3,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"grok-4.7","g":["grok"],"v":11,"t":null,"qt":0,"mr":1,"cr":3,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"len < 200000 ? tier(\"短上下文\", p * 2 + c * 6 + cr * 0.5) : len >= 200000 ? tier(\"长上下文\", p * 4 + c * 12 + cr * 1) : tier(\"tier_3\", p * 2 + c * 6 + cr * 0.5)"},{"n":"gemini-3.8-flash-medium","g":["gemini"],"v":3,"t":null,"qt":0,"mr":37.5,"cr":4,"mp":0,"ep":["gemini","openai"],"bm":null,"be":null},{"n":"claude-opus-4-5","g":["claude-max","claude"],"v":12,"t":"Reasoning,Tools,Files,Vision,200K","qt":0,"mr":37.5,"cr":5,"mp":0,"ep":["anthropic","openai"],"bm":null,"be":null},{"n":"kimi-k2.8-preview","g":["国模"],"v":4,"t":null,"qt":0,"mr":3.5,"cr":3.857142857143,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"gpt-5.5","g":["gpt-fast"],"v":1,"t":null,"qt":0,"mr":2.5,"cr":6,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"glm-5.3-flash","g":["国模"],"v":8,"t":null,"qt":0,"mr":0.4,"cr":3.5,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"gpt-5.6-sol","g":["plus","gpt-pro","vip","gpt-fast"],"v":1,"t":null,"qt":0,"mr":2.5,"cr":6,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"len < 272000 ? tier(\"base\", p * 5 + c * 30 + cr * 0.5 + cc * 6.25) : len >= 272000 ? tier(\"272K+\", p * 10 + c * 45 + cr * 1 + cc * 12.5) : tier(\"原价\", p * 5 + c * 30 + cr * 0.5 + cc * 6.25)"},{"n":"claude-opus-4-6","g":["claude","claude-max"],"v":12,"t":"Reasoning,Tools,Files,Vision,1M","qt":0,"mr":2.5,"cr":5,"mp":0,"ep":["anthropic","openai"],"bm":null,"be":null},{"n":"claude-sonnet-4-6","g":["claude-max","claude"],"v":12,"t":null,"qt":0,"mr":1.5,"cr":5,"mp":0,"ep":["anthropic","openai"],"bm":null,"be":null},{"n":"claude-fable-5-1","g":["claude-max"],"v":12,"t":null,"qt":0,"mr":5,"cr":5,"mp":0,"ep":["anthropic","openai"],"bm":null,"be":null},{"n":"hy3","g":["国模"],"v":null,"t":null,"qt":0,"mr":0.5,"cr":4,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"gpt-6-astra","g":["gpt-pro","vip","gpt-fast","plus"],"v":1,"t":null,"qt":0,"mr":5,"cr":5,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"len <= 272000 ? tier(\"短上下文\", p * 10 + c * 50 + cr * 1 + cc * 12.5) : len > 272000 ? tier(\"长上下文\", p * 20 + c * 75 + cr * 2 + cc * 25) : tier(\"tier_3\", p * 20 + c * 75 + cr * 2 + cc * 25)"},{"n":"gpt-6-sol","g":["gpt-pro","vip","gpt-fast","plus"],"v":1,"t":null,"qt":0,"mr":37.5,"cr":2,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"len < 272000 ? tier(\"短上下文\", p * 2 + c * 10 + cr * 0.2 + cc * 2.5) : len >= 272000 ? tier(\"长上下文\", p * 4 + c * 15 + cr * 0.4 + cc * 5) : tier(\"触发不了的兜底\", p * 4 + c * 15 + cr * 0.4 + cc * 5)"},{"n":"claude-haiku-4-5-20251001","g":["claude-max"],"v":12,"t":"Reasoning,Tools,Files,Vision,200K","qt":0,"mr":0.5,"cr":5,"mp":0,"ep":["anthropic","openai"],"bm":null,"be":null},{"n":"claude-haiku-4-5","g":["claude-max","claude"],"v":12,"t":"Reasoning,Tools,Files,Vision,200K","qt":0,"mr":0.5,"cr":5,"mp":0,"ep":["anthropic","openai"],"bm":null,"be":null},{"n":"z-ai/glm-5.3","g":["default"],"v":8,"t":null,"qt":0,"mr":0.5,"cr":1,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"gpt-image-2.5-sunburst","g":["vip","gpt-pro","gpt-image"],"v":1,"t":null,"qt":1,"mr":0,"cr":0,"mp":1,"ep":["image-generation","openai"],"bm":null,"be":null},{"n":"grok-imagine-image-quality","g":["grok-image"],"v":11,"t":null,"qt":1,"mr":0,"cr":0,"mp":0.008,"ep":["image-generation","openai"],"bm":null,"be":null},{"n":"grok-imagine-video-1080p","g":["grok-video"],"v":11,"t":null,"qt":1,"mr":0,"cr":0,"mp":0.1,"ep":["openai","openai-response"],"bm":null,"be":null},{"n":"claude-opus-4-8","g":["claude-max","claude"],"v":12,"t":null,"qt":0,"mr":2.5,"cr":5,"mp":0,"ep":["anthropic","openai"],"bm":null,"be":null},{"n":"claude-opus-5-5","g":["claude-max","claude"],"v":12,"t":null,"qt":0,"mr":2,"cr":5,"mp":0,"ep":["anthropic","openai"],"bm":null,"be":null},{"n":"grok-imagine-video","g":["grok-video"],"v":11,"t":null,"qt":1,"mr":0,"cr":0,"mp":0.1,"ep":["openai","openai-response"],"bm":null,"be":null},{"n":"claude-fable-5","g":["claude-max"],"v":12,"t":null,"qt":0,"mr":5,"cr":5,"mp":0,"ep":["anthropic","openai"],"bm":null,"be":null},{"n":"hy4-preview","g":["国模"],"v":null,"t":null,"qt":0,"mr":3,"cr":3,"mp":0,"ep":["openai"],"bm":null,"be":null}]},"15":{"id":15,"name":"码少","site":"https://cjms.cc/","type":"newapi","raw_bytes":7605,"usable_group":{"GPT混池":"","Gemini":"","Muse":"","guomo":"","kimi":"","vip":"","测试":"","生图0.03/次":""},"group_ratio":{"GPT混池":0.06,"Gemini":0.2,"Muse":1,"guomo":0.05,"kimi":0.05,"vip":1,"测试":0.001,"生图0.03/次":1},"auto_groups":[],"vendors":{"9":"Google","1":"Vivgrid","3":"xAI","5":"Venice AI","6":"Xpersona","8":"智谱","-1011":"Moonshot","2":"OpenAI","4":"Anthropic","7":"DeepSeek"},"has_marketplace":true,"models":[{"n":"claude-opus-5.5","g":["default","码少专用","测试"],"v":4,"t":null,"qt":0,"mr":37.5,"cr":1,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"tier(\"base\", p * 4 + c * 20 + cr * 0.2 + cc * 5)"},{"n":"deepseek-v4.1-flash","g":["guomo","富贵","码少专用"],"v":7,"t":null,"qt":0,"mr":37.5,"cr":1,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"(tier(\"标准计费\", p * 1 + c * 4 + cr * 0.05 + cc * 1.25)) * (hour(\"Asia/Shanghai\") >= 9 && hour(\"Asia/Shanghai\") < 12 && (weekday(\"Asia/Shanghai\") >= 1 && weekday(\"Asia/Shanghai\") <= 5) ? 2 : 1) * (hour(\"Asia/Shanghai\") >= 14 && hour(\"Asia/Shanghai\") < 18 && (weekday(\"Asia/Shanghai\") >= 1 && weekday(\"Asia/Shanghai\") <= 5) ? 2 : 1)"},{"n":"gemini-3.1-pro-high","g":["Gemini","码少专用"],"v":9,"t":null,"qt":0,"mr":1,"cr":6,"mp":0,"ep":["gemini","openai"],"bm":null,"be":null},{"n":"gemini-3.8-flash","g":["码少专用","Gemini"],"v":9,"t":null,"qt":0,"mr":0.375,"cr":5,"mp":0,"ep":["openai","gemini"],"bm":null,"be":null},{"n":"gemini-4-argon-high","g":["Gemini","码少专用"],"v":9,"t":null,"qt":0,"mr":37.5,"cr":4,"mp":0,"ep":["gemini","openai"],"bm":"tiered_expr","be":"tier(\"base\", p * 2 + c * 10 + cr * 0.1)"},{"n":"glm-5.3-flash","g":["GLM","guomo","富贵","码少专用"],"v":8,"t":null,"qt":0,"mr":0.4,"cr":3.5,"mp":0,"ep":["openai"],"bm":null,"be":null},{"n":"gpt-5.6-sol","g":["GPT混池"],"v":2,"t":"Reasoning,Tools,Files,Vision,372K","qt":0,"mr":37.5,"cr":6,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"len < 272000 ? tier(\"默认\", p * 5 + c * 30 + cr * 0.5 + cc * 6.25) : len >= 272000 ? tier(\"超过272K双倍计费\", p * 10 + c * 45 + cr * 1 + cc * 12.5) : tier(\"原价计费\", p * 5 + c * 30 + cr * 0.5 + cc * 6.25)"},{"n":"gpt-6-astra","g":["GPT混池"],"v":2,"t":null,"qt":0,"mr":37.5,"cr":2,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"len <= 272000 ? tier(\"standard\", p * 10 + cr * 1 + cc * 12.5 + c * 50) : tier(\"long_context\", p * 20 + cr * 2 + cc * 25 + c * 75)"},{"n":"gpt-6-sol","g":["GPT混池"],"v":2,"t":null,"qt":0,"mr":37.5,"cr":2,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"len < 272000 ? tier(\"默认\", p * 2 + c * 10 + cr * 0.2 + cc * 2.5) : len >= 272000 ? tier(\"超过272K双倍计费\", p * 4 + c * 15 + cr * 0.4 + cc * 5) : tier(\"原价计费\", p * 2 + c * 10 + cr * 0.2 + cc * 2.5)"},{"n":"gpt-6.1-sol","g":["GPT混池","default","码少专用","测试"],"v":2,"t":null,"qt":0,"mr":37.5,"cr":2,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"len < 272000 ? tier(\"默认\", p * 2 + c * 10 + cr * 0.1 + cc * 2.5) : len >= 272000 ? tier(\"超过272K双倍计费\", p * 4 + c * 15 + cr * 0.2 + cc * 5) : tier(\"原价计费\", p * 2 + c * 10 + cr * 0.1 + cc * 2.5)"},{"n":"gpt-image-2.5-sunburst","g":["生图0.03/次","码少专用"],"v":null,"t":null,"qt":0,"mr":37.5,"cr":2,"mp":0,"ep":["image-generation","openai"],"bm":"tiered_expr","be":"tier(\"standard\", fixed(0.03))"},{"n":"kimi-k3.1-pro","g":["kimi","富贵","码少专用"],"v":-1011,"t":null,"qt":0,"mr":37.5,"cr":1,"mp":0,"ep":["openai"],"bm":"tiered_expr","be":"tier(\"base\", p * 13 + c * 68 + cr * 1.3 + cc * 13 + cc1h * 26)"},{"n":"muse-image","g":["Muse","码少专用"],"v":null,"t":null,"qt":0,"mr":37.5,"cr":1,"mp":0,"ep":["openai","image-generation"],"bm":"tiered_expr","be":"tier(\"base\", fixed(0.02))"},{"n":"muse-video","g":["Muse","码少专用"],"v":null,"t":null,"qt":0,"mr":37.5,"cr":1,"mp":0,"ep":["openai","openai-video"],"bm":"tiered_expr","be":"tier(\"base\", u(\"seconds\") * 0.02)"}]}};
+
+const S={cid:"9",g:null,degrade:null,q:"",sort:"ratio",page:1,ps:20,modal:false};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmtN=n=>{ if(n==null) return "—"; if(Math.abs(n-Math.round(n))<1e-9) return String(Math.round(n)); return String(Number(n.toFixed(4))); };
+function ch(){ return RD[S.cid]; }
+
+// 分组集合 = usable_group（已授权的）× 被模型引用的（可能更多）
+function groups(){
+  const c=ch();
+  const ref=new Map();
+  c.models.forEach(m=>(m.g||[]).forEach(g=>{
+    if(!ref.has(g)) ref.set(g,0);
+    ref.set(g,ref.get(g)+1);
+  }));
+  const ug=c.usable_group||{}, gr=c.group_ratio||{};
+  const names=new Set([...Object.keys(ug),...ref.keys()]);
+  return [...names].map(n=>({
+    name:n, ratio:gr[n]??null, desc:ug[n]??null,
+    authorized:Object.prototype.hasOwnProperty.call(ug,n),
+    count:ref.get(n)||0
+  })).sort((a,b)=>{
+    if(a.authorized!==b.authorized) return a.authorized?-1:1;
+    return b.count-a.count||a.name.localeCompare(b.name,"zh-CN");
+  });
+}
+function curG(){ return S.g?groups().find(x=>x.name===S.g):null; }
+function modelsOf(g){ return g?ch().models.filter(m=>(m.g||[]).includes(g.name)):[]; }
+function unlisted(){ // 被引用但未在 usable_group 定义
+  return groups().filter(g=>!g.authorized);
+}
+function localExtra(){
+  const c=ch(); const up=new Set(groups().map(g=>g.name));
+  return (c.local_snapshot||[]).filter(n=>!up.has(n));
+}
+
+function render(){
+  const c=ch();
+  $("#tabs").innerHTML=Object.values(RD).map(x=>`
+    <button class="tab ${S.cid===String(x.id)?"on":""}" data-cid="${x.id}">
+      ${esc(x.name)}<span class="ty n">newapi</span></button>`).join("");
+
+  const gs=groups(), g=curG(), un=unlisted();
+
+  const chips=gs.map(x=>`<button class="chip ${S.g===x.name?"on":""}" data-g="${esc(x.name)}"
+      title="${esc(x.name)}${x.desc?" · "+esc(x.desc):""} · 倍率 ${x.ratio??"—"} · ${x.count} 个模型">
+      <span class="dot ${x.authorized?"":"restricted"}"></span>
+      <span class="nm">${esc(x.name)}</span>
+      <span class="r">${x.ratio==null?(x.authorized?"—":"?"):fmtN(x.ratio)}</span>
+    </button>`).join("");
+
+  $("#host").innerHTML=`<div class="card"><div class="cb">
+    <div class="ctop">
+      <span class="cname">${esc(c.name)}</span>
+      <span class="pill brand">NewAPI</span>
+      <span class="pill">group_models</span>
+      <span class="site mono">${esc(c.site)}</span>
+      <div class="kpi">
+        <div><div class="k">分组(已授权)</div><div class="v">${Object.keys(c.usable_group||{}).length}</div></div>
+        <div><div class="k">分组(被模型引用)</div><div class="v">${gs.length}</div></div>
+        <div><div class="k">模型</div><div class="v">${c.models.length}</div></div>
+      </div>
+    </div>
+    <div class="sec">
+      <div class="sech"><span class="t">${gs.length} 个分组 · 点分组查看模型</span>
+        ${un.length?`<span class="warnline">· ${un.length} 个分组未在本账号授权列表</span>`:""}</div>
+      <div class="chips">${chips}</div>
+      ${un.length?`<div style="margin-top:6px;font-size:10px;color:var(--warn)">
+        未授权：${un.map(x=>esc(x.name)).join(" · ")}　<span class="dim">（模型引用了这些分组，但不在当前账号的 <span class="mono">usable_group</span> 里，可能无法调用；倍率用 ? 表示未知）</span></div>`:""}
+      ${g?renderExpand(g):""}
+    </div>
+  </div></div>`;
+  renderSide();
+  if(S.modal) renderModal();
+}
+
+function renderExpand(g){
+  const ms=modelsOf(g), total=ms.length;
+  const head=`<div class="exh"><div class="r1">
+    <span class="gn">${esc(g.name)}</span>
+    ${g.desc?`<span class="ds">${esc(g.desc)}</span>`:""}
+    <span class="meta">
+      <span>分组倍率 <b>${g.ratio==null?"—":fmtN(g.ratio)}</b></span>
+      <span>模型 <b>${total}</b></span>
+    </span></div>
+    <div class="r2">
+      ${g.authorized?`<span class="tagx on">已授权</span>`:`<span class="tagx warn">未在授权列表</span>`}
+      ${(ch().auto_groups||[]).includes(g.name)?`<span class="tagx">自动分组</span>`:""}
+      ${(ch().group_ratio||{})[g.name]==null?`<span class="tagx warn">无分组倍率</span>`:""}
+    </div></div>`;
+
+  if(S.degrade==="auth") return `<div class="exp">${head}<div class="msg">
+    <b>该渠道登录已失效。</b><br>
+    <span class="mono">GET /api/user/self/groups → 401 AUTH_TOKEN_EXPIRED</span>（码少实测）。
+    匿名 <span class="mono">/api/pricing</span> 仍可取，但分组描述缺失。<br>
+    <div class="acts"><button class="btn pri">重新登录该渠道</button><button class="btn" data-act="retry">重试</button></div>
+  </div></div>`;
+  if(S.degrade==="fail") return `<div class="exp">${head}<div class="msg">
+    <b>读取上游定价失败。</b><br><span class="mono dim">GET /api/pricing → HTTP 502（截断 200 字）</span>
+    <div class="acts"><button class="btn" data-act="retry">重试</button></div></div></div>`;
+  if(!total) return `<div class="exp">${head}<div class="msg">
+    <b>该分组当前没有可售模型。</b><br>定价接口只返回在售模型，已下架的不会出现。</div></div>`;
+
+  const show=sortList(ms).slice(0,6);
+  const rows=show.map(m=>row(m)).join("");
+  const foot=`<div class="exf"><span class="dim">显示前 ${show.length} / ${total} 个</span>
+    ${total>6?`<button class="more" data-act="all">查看全部 ${total} 个
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></button>`
+      :`<span class="dim" style="margin-left:auto">已显示全部</span>`}</div>`;
+
+  return `<div class="exp">${head}
+    <table><colgroup><col style="width:42%"><col style="width:16%"><col style="width:13%"><col style="width:29%"></colgroup>
+    <thead><tr><th>模型</th><th style="text-align:right">模型倍率</th><th style="text-align:right">补全</th><th>计费 / 归属</th></tr></thead>
+    <tbody>${rows}</tbody></table>${foot}</div>`;
+}
+
+function row(m){
+  const c=ch();
+  const vn=m.v!=null?(c.vendors[String(m.v)]||""):"";
+  const shared=(m.g||[]).length>1;
+  const tiered=m.bm==="tiered_expr";
+  const paid=!tiered&&(m.qt||0)!==0&&(m.mp||0)>0;
+  const comp=m.cr==null?"—":(Math.abs(m.cr-Math.round(m.cr))<1e-9?"×"+Math.round(m.cr):"×"+Number(m.cr.toFixed(2)));
+  const billing=tiered?`<span class="mini paid">阶梯</span><span class="dim mono" style="font-size:9.5px;display:block;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(m.be||"")}">${esc(briefExpr(m.be))}</span>`
+    :paid?`<span class="mini paid">按次 $${m.mp}</span>`:`<span class="dim" style="font-size:10.5px">按倍率</span>`;
+  return `<tr>
+    <td><div class="mn"><span class="n mono" title="${esc(m.n)}">${esc(m.n)}</span>
+      ${shared?`<span class="mini sh" title="${esc(m.g.join(" / "))}">+${m.g.length-1} 组</span>`:""}</div>
+      ${vn?`<div class="dim" style="font-size:10px;margin-top:1px">${esc(vn)}</div>`:""}</td>
+    <td class="num">${tiered?`<span class="dim mono" style="font-size:10px" title="${esc(m.be||"")}">表达式</span>`:(paid?'<span class="dim">按次</span>':fmtN(m.mr))}</td>
+    <td class="num">${comp}</td>
+    <td>${billing}${m.t?`<span class="dim" style="font-size:10px;display:block;margin-top:2px">${esc(m.t.split(",").slice(0,2).join(" · "))}</span>`:""}</td>
+  </tr>`;
+}
+
+function briefExpr(e){
+  if(!e) return "";
+  const f=[];
+  if(/p\s*\*/.test(e)){const m=e.match(/p\s*\*\s*([\d.]+)/);if(m)f.push("入×"+m[1]);}
+  if(/c\s*\*/.test(e)){const m=e.match(/\bc\s*\*\s*([\d.]+)/);if(m)f.push("出×"+m[1]);}
+  if(/fixed\(/.test(e)){const m=e.match(/fixed\(([\d.]+)\)/);if(m)f.push("$"+m[1]+"/次");}
+  if(/u\("seconds"\)/.test(e)){const m=e.match(/u\("seconds"\)\s*\*\s*([\d.]+)/);if(m)f.push("$"+m[1]+"/秒");}
+  if(/len\s*[<=>]/.test(e)) f.push("按长度分档");
+  return f.length? f.join(" · ") : "自定义表达式";
+}
+function sortList(ms){
+  const q=S.q.trim().toLowerCase();
+  let out=ms.slice();
+  if(q) out=out.filter(m=>m.n.toLowerCase().includes(q)||(ch().vendors[String(m.v)]||"").toLowerCase().includes(q));
+  if(S.sort==="ratio") out.sort((a,b)=>(b.mr||0)-(a.mr||0));
+  else out.sort((a,b)=>a.n.localeCompare(b.n));
+  return out;
+}
+
+function renderSide(){
+  const c=ch();
+  const kv=[["类型","newapi"],["接口","/api/pricing"],["鉴权","Bearer + New-Api-User"],
+    ["响应",""+(c.raw_bytes||0)+" B"],["分组→模型","enable_groups ✅"]];
+  $("#src").innerHTML=kv.map(([k,v])=>`<div class="kv"><span class="k">${esc(k)}</span><span class="v mono" style="font-size:10px">${esc(v)}</span></div>`).join("");
+}
+const DGN={ok:'当前：正常。上游实时数据。',
+  auth:'当前：<b>会话过期</b>。码少实测 <code>/api/user/self/groups</code> 返回 401，但 <code>/api/pricing</code> 匿名仍可读 → 分组描述会缺失。',
+  fail:'当前：<b>请求失败</b>。错误摘要 + 重试。'};
+function renderDg(){
+  $("#dgBtns").innerHTML=[["ok","正常"],["auth","会话过期"],["fail","请求失败"]]
+    .map(([k,l])=>`<button data-dg="${k}" class="${(S.degrade??"ok")===k?"on":""}">${l}</button>`).join("");
+  $("#dgNote").innerHTML=DGN[S.degrade??"ok"];
+  const c=ch();
+  const un=unlisted().length, ex=localExtra().length;
+  $("#findings").innerHTML=`
+    · <b>${esc(c.name)}</b>：${Object.keys(c.usable_group||{}).length} 个已授权分组，模型共引用 ${groups().length} 个
+    ${un?`，<b>${un} 个未授权</b>`:""}${ex?`，本地快照多 ${ex} 个`:""}<br>
+    · 同一分组内倍率差异极大（xem 的 claude 组：0.5 ~ 37.5，差 75 倍）<br>
+    · 码少用 <code>tiered_expr</code> 计费表达式，没有简单倍率<br>
+    · 不做参数规模 / 上下文窗口（上游不返回）`;
+}
+
+function renderModal(){
+  const g=curG(); if(!g){S.modal=false;return;}
+  const all=sortList(modelsOf(g));
+  const pages=Math.max(1,Math.ceil(all.length/S.ps));
+  if(S.page>pages) S.page=pages;
+  const cur=all.slice((S.page-1)*S.ps,S.page*S.ps);
+  const body=cur.map(m=>{
+    const c=ch();
+    const vn=m.v!=null?(c.vendors[String(m.v)]||""):"";
+    const tiered=m.bm==="tiered_expr";
+    const paid=!tiered&&(m.qt||0)!==0&&(m.mp||0)>0;
+    const comp=m.cr==null?"—":(Math.abs(m.cr-Math.round(m.cr))<1e-9?"×"+Math.round(m.cr):"×"+Number(m.cr.toFixed(2)));
+    return `<tr>
+      <td><div class="mn"><span class="n mono">${esc(m.n)}</span>
+        ${(m.g||[]).length>1?`<span class="mini sh" title="${esc(m.g.join(" / "))}">+${m.g.length-1} 组</span>`:""}</div></td>
+      <td>${vn?esc(vn):'<span class="dim">—</span>'}</td>
+      <td>${m.t?esc(m.t.split(",").slice(0,3).join(" · ")):'<span class="dim">—</span>'}</td>
+      <td class="num">${tiered?'<span class="dim">阶梯</span>':(paid?'<span class="dim">按次</span>':fmtN(m.mr))}</td>
+      <td class="num">${comp}</td>
+      <td style="font-size:10px"><span class="mono dim">${esc((m.ep||[]).join(", ")||"—")}</span></td>
+    </tr>`;
+  }).join("");
+  const pager=[]; const st=pages<=7?1:Math.max(1,Math.min(S.page-3,pages-6));
+  for(let i=st;i<=Math.min(pages,st+6);i++) pager.push(`<button class="${i===S.page?"on":""}" data-p="${i}">${i}</button>`);
+
+  $("#mod").innerHTML=`<div class="mh"><div class="r1">
+      <h2>${esc(g.name)}</h2>
+      <span class="pill">${all.length} 个模型</span>
+      <span class="pill">分组倍率 ${g.ratio==null?"—":fmtN(g.ratio)}</span>
+      ${g.authorized?`<span class="pill" style="color:var(--brand);border-color:color-mix(in oklab,var(--brand) 40%,transparent)">已授权</span>`
+        :`<span class="pill" style="color:var(--warn);border-color:color-mix(in oklab,var(--warn) 45%,transparent)">未授权</span>`}
+      <button class="btn" style="margin-left:auto" data-act="close">关闭</button></div>
+      <p>${g.desc?esc(g.desc):"（该分组在 usable_group 中无描述）"}</p>
+      <div class="mt"><input id="mq" placeholder="搜索模型名 / 厂商" value="${esc(S.q)}">
+        <button class="btn ${S.sort==="ratio"?"on":""}" data-sort="ratio">按倍率</button>
+        <button class="btn ${S.sort==="name"?"on":""}" data-sort="name">按名称</button></div>
+    </div>
+    <div class="mb"><table style="margin-top:8px">
+      <colgroup><col style="width:34%"><col style="width:13%"><col style="width:21%"><col style="width:11%"><col style="width:10%"><col style="width:11%"></colgroup>
+      <thead><tr><th>模型</th><th>厂商</th><th>能力标签</th><th style="text-align:right">倍率</th><th style="text-align:right">补全</th><th>协议</th></tr></thead>
+      <tbody>${body||`<tr><td colspan="6" class="dim" style="text-align:center;padding:22px">没有匹配的模型</td></tr>`}</tbody></table></div>
+    <div class="mf"><span class="info">共 ${all.length} 个${S.q?"（已搜索）":""}</span>
+      <div class="pg"><button data-p="prev" ${S.page===1?"disabled":""}>‹</button>${pager.join("")}
+      <button data-p="next" ${S.page===pages?"disabled":""}>›</button></div></div>`;
+  $("#mod").classList.add("on"); $("#ov").classList.add("on");
+}
+function closeModal(){ S.modal=false; $("#mod").classList.remove("on"); $("#ov").classList.remove("on"); }
+
+document.addEventListener("click",e=>{
+  const t=e.target.closest(".tab"); if(t){S.cid=t.dataset.cid;S.g=null;S.q="";S.page=1;S.degrade=null;render();renderDg();return;}
+  const c=e.target.closest(".chip"); if(c){const k=c.dataset.g;S.g=(S.g===k)?null:k;S.q="";S.page=1;render();return;}
+  const a=e.target.closest("[data-act]");
+  if(a){const k=a.dataset.act;
+    if(k==="all"){S.modal=true;S.page=1;renderModal();}
+    if(k==="close") closeModal();
+    if(k==="retry"){S.degrade="ok";render();renderDg();}
+    return;}
+  const p=e.target.closest("[data-p]");
+  if(p){const all=sortList(modelsOf(curG()));const pages=Math.max(1,Math.ceil(all.length/S.ps));const v=p.dataset.p;
+    if(v==="prev")S.page=Math.max(1,S.page-1); else if(v==="next")S.page=Math.min(pages,S.page+1); else S.page=Number(v);
+    renderModal();return;}
+  const s=e.target.closest("[data-sort]"); if(s){S.sort=s.dataset.sort;S.page=1;renderModal();return;}
+  const d=e.target.closest("[data-dg]"); if(d){S.degrade=d.dataset.dg==="ok"?null:d.dataset.dg;renderDg();render();return;}
+  if(e.target.id==="ov") closeModal();
+});
+document.addEventListener("input",e=>{
+  if(e.target.id==="mq"){S.q=e.target.value;S.page=1;renderModal();
+    const i=document.getElementById("mq"); if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}}
+});
+document.addEventListener("keydown",e=>{
+  if(e.key==="Escape"){ if(S.modal) closeModal(); else if(S.g){S.g=null;render();} }
+});
+$("#th").onclick=()=>{const d=document.documentElement.classList.toggle("dark");$("#th").textContent=d?"浅色":"深色";};
+
+const h=decodeURIComponent(location.hash.replace("#",""));
+if(h){const [cid,g,act]=h.split("/"); if(cid&&RD[cid])S.cid=cid; if(g)S.g=g; if(act==="all")S.modal=true;}
+if(h.includes("dg:auth"))S.degrade="auth";
+render();renderDg();
+</script>
+</body>
+</html>

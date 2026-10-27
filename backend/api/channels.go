@@ -46,6 +46,7 @@ func registerChannels(g *gin.RouterGroup, d *Deps) {
 	gp.POST("/:id/api-keys/:key_id/reveal", func(c *gin.Context) { revealChannelAPIKey(c, d) })
 	gp.POST("/:id/sync", func(c *gin.Context) { syncChannel(c, d) })
 	gp.GET("/:id/rates", func(c *gin.Context) { channelRates(c, d) })
+	gp.GET("/:id/upstream-catalog", func(c *gin.Context) { channelUpstreamCatalog(c, d) })
 	gp.GET("/:id/balance-history", func(c *gin.Context) { balanceHistory(c, d) })
 }
 
@@ -749,6 +750,32 @@ func channelRates(c *gin.Context, d *Deps) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": list})
+}
+
+// channelUpstreamCatalog 返回「分组 → 模型」上游目录，供渠道卡片的分组内模型视图使用。
+//
+// 只读上游、不落库；服务层带 5 分钟缓存，?fresh=1 可强制刷新。
+// 降级场景（上游不支持 / 会话失效 / 拉取失败）仍返回 200 + degrade 字段，
+// 让前端能展示分组配置并给出原因，而不是只弹一个错误。
+func channelUpstreamCatalog(c *gin.Context, d *Deps) {
+	id, err := uintParam(c, "id")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	fresh := c.Query("fresh") == "1" || strings.EqualFold(c.Query("fresh"), "true")
+	cat, catErr := d.ChannelSvc.GetUpstreamCatalog(c.Request.Context(), id, fresh)
+
+	payload := gin.H{
+		"channel_id": id,
+		"data":       cat,
+		"fetched_at": time.Now().Format(time.RFC3339),
+	}
+	if catErr != nil {
+		// 失败也回 200：前端据 degrade 字段区分「降级」与「彻底失败」。
+		payload["error"] = catErr.Error()
+	}
+	c.JSON(http.StatusOK, payload)
 }
 
 func balanceHistory(c *gin.Context, d *Deps) {

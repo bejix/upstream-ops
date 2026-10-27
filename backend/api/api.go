@@ -41,6 +41,8 @@ type channelService interface {
 	GetSubscriptionUsage(ctx context.Context, channelID uint) (*connector.SubscriptionUsageInfo, error)
 	ListAPIKeys(ctx context.Context, channelID uint, query connector.APIKeyQuery) (*connector.APIKeyPage, error)
 	ListAPIKeyGroups(ctx context.Context, channelID uint) ([]connector.APIKeyGroup, error)
+	// GetUpstreamCatalog 拉取「分组 → 模型」上游目录（带 5 分钟缓存，fresh=true 强制刷新）。
+	GetUpstreamCatalog(ctx context.Context, channelID uint, fresh bool) (*connector.Catalog, error)
 	// ListAPIKeyGroupSet 拉取该渠道"已创建密钥的分组集合"，用于"仅显示已创建密钥的分组"开关。
 	ListAPIKeyGroupSet(ctx context.Context, channelID uint) (*channel.APIKeyGroupSet, error)
 	CreateAPIKey(ctx context.Context, channelID uint, req connector.APIKeyCreateRequest) (*connector.APIKey, error)

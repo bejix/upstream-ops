@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>分组内模型信息 · 交互原型（方案 B）</title>
+<style>
+:root{
+  --background:oklch(1 0 0);--foreground:oklch(.145 0 0);--card:oklch(1 0 0);
+  --muted:oklch(.97 0 0);--muted-foreground:oklch(.556 0 0);--border:oklch(.922 0 0);
+  --primary:oklch(.205 0 0);--primary-foreground:oklch(.985 0 0);
+  --secondary:oklch(.97 0 0);--accent:oklch(.97 0 0);
+  --brand:oklch(.546 .215 262.881);--danger:oklch(.637 .237 25.331);
+  --ok-bg:#E1F5EE;--ok-fg:#0F6E56;--ok-bd:#9FE1CB;
+  --warn-bg:#FAEEDA;--warn-fg:#854F0B;--warn-bd:#FAC775;
+  --slow-bg:#FAECE7;--slow-fg:#993C1D;--slow-bd:#F5C4B3;
+  --fail-bg:#FCEBEB;--fail-fg:#A32D2D;--fail-bd:#F7C1C1;
+  --un-bg:oklch(.97 0 0);--un-fg:oklch(.556 0 0);--un-bd:oklch(.922 0 0);
+  --row-hover:oklch(.975 0 0);
+}
+.dark{
+  --background:oklch(.145 0 0);--foreground:oklch(.985 0 0);--card:oklch(.145 0 0);
+  --muted:oklch(.269 0 0);--muted-foreground:oklch(.708 0 0);--border:oklch(.269 0 0);
+  --primary:oklch(.985 0 0);--primary-foreground:oklch(.205 0 0);
+  --secondary:oklch(.269 0 0);--accent:oklch(.269 0 0);
+  --brand:oklch(.623 .214 259.815);--danger:oklch(.645 .246 16.439);
+  --ok-bg:rgba(29,158,117,.16);--ok-fg:#5DCAA5;--ok-bd:rgba(29,158,117,.42);
+  --warn-bg:rgba(186,117,23,.18);--warn-fg:#EF9F27;--warn-bd:rgba(186,117,23,.45);
+  --slow-bg:rgba(216,90,48,.16);--slow-fg:#F0997B;--slow-bd:rgba(216,90,48,.42);
+  --fail-bg:rgba(226,75,74,.15);--fail-fg:#F09595;--fail-bd:rgba(226,75,74,.42);
+  --un-bg:rgba(255,255,255,.045);--un-fg:oklch(.708 0 0);--un-bd:oklch(.3 0 0);
+  --row-hover:rgba(255,255,255,.028);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--background);color:var(--foreground);
+  font-family:"Geist",system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  font-size:14px;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column;overflow:hidden}
+.mono{font-family:ui-monospace,"Geist Mono",SFMono-Regular,Menlo,monospace}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+.topbar{height:54px;flex:0 0 54px;display:flex;align-items:center;gap:14px;
+  padding:0 16px;border-bottom:1px solid var(--border);background:var(--card)}
+.brand{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;letter-spacing:.01em}
+.brand .mark{width:18px;height:18px;border-radius:5px;background:var(--foreground);opacity:.9}
+.nav{display:flex;gap:2px;margin-left:6px}
+.nav-item{padding:6px 12px;border-radius:7px;font-size:13px;color:var(--muted-foreground);cursor:default;display:flex;align-items:center;gap:6px}
+.nav-item.active{background:var(--muted);color:var(--foreground);font-weight:500}
+.top-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.tagline{font-size:12px;color:var(--muted-foreground)}
+.toggle{font-size:12px;padding:5px 10px;border:1px solid var(--border);border-radius:7px;
+  background:transparent;color:var(--muted-foreground);cursor:pointer;font-family:inherit}
+.toggle:hover{background:var(--muted);color:var(--foreground)}
+.toggle.on{border-color:var(--brand);color:var(--brand)}
+
+.workspace{flex:1;display:flex;gap:14px;padding:14px 16px 16px;min-height:0}
+.sidebar{width:268px;flex:0 0 268px;display:flex;flex-direction:column;gap:10px;min-height:0}
+.card{border:1px solid var(--border);border-radius:10px;background:var(--card);overflow:hidden}
+.card-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px}
+.card-head h2{margin:0;font-size:13px;font-weight:500}
+.mini-btn{font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:6px;
+  background:transparent;color:var(--foreground);cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:4px}
+.mini-btn:hover{background:var(--muted)}
+.group-list{padding:0 8px 8px;display:flex;flex-direction:column;gap:6px;overflow:auto;max-height:min(66vh,540px)}
+.group-item{border:1px solid color-mix(in oklab,var(--border) 70%,transparent);border-radius:9px;
+  padding:8px 9px;cursor:pointer;background:transparent;transition:.15s;position:relative}
+.group-item:hover{background:var(--row-hover);border-color:var(--border)}
+.group-item.selected{border-color:color-mix(in oklab,var(--brand) 55%,transparent);
+  background:color-mix(in oklab,var(--brand) 8%,transparent);
+  box-shadow:0 0 0 1px color-mix(in oklab,var(--brand) 22%,transparent)}
+.g-line1{display:flex;align-items:center;gap:6px;min-width:0}
+.g-name{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.badge{font-size:10px;line-height:16px;padding:0 6px;border-radius:5px;flex:0 0 auto;font-weight:500}
+.badge.active{background:var(--primary);color:var(--primary-foreground)}
+.badge.disabled{background:var(--secondary);color:var(--muted-foreground)}
+.chip-models{margin-left:auto;flex:0 0 auto;display:inline-flex;align-items:center;gap:4px;
+  font-size:10px;line-height:17px;padding:0 6px;border-radius:5px;border:1px solid var(--border);
+  color:var(--muted-foreground);background:var(--muted)}
+.chip-models:hover{color:var(--foreground)}
+.g-desc{font-size:11px;line-height:16px;color:var(--muted-foreground);margin-top:4px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.g-desc .none{opacity:.55}
+.g-actions{display:flex;justify-content:flex-end;gap:2px;margin-top:4px;opacity:.5}
+.group-item:hover .g-actions,.group-item.selected .g-actions{opacity:.95}
+.icon-btn{width:24px;height:24px;display:grid;place-items:center;border:0;background:transparent;
+  border-radius:5px;color:var(--muted-foreground);cursor:pointer}
+.icon-btn:hover{background:var(--muted);color:var(--foreground)}
+.icon-btn.danger:hover{color:var(--danger)}
+.side-note{padding:10px 12px;font-size:11px;line-height:17px;color:var(--muted-foreground);
+  border-top:1px solid var(--border)}
+.side-note b{color:var(--foreground);font-weight:500}
+
+.main{flex:1;min-width:0;display:flex;flex-direction:column;gap:12px;overflow:auto}
+.group-head{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap}
+.group-head h1{margin:0;font-size:17px;font-weight:500;letter-spacing:.01em}
+.group-head .sub{font-size:12px;color:var(--muted-foreground);margin-top:3px}
+.head-actions{margin-left:auto;display:flex;gap:6px}
+.btn{font-family:inherit;font-size:12px;padding:6px 11px;border-radius:7px;cursor:pointer;
+  border:1px solid var(--border);background:var(--card);color:var(--foreground);display:inline-flex;align-items:center;gap:5px}
+.btn:hover{background:var(--muted)}
+.btn.primary{background:var(--primary);color:var(--primary-foreground);border-color:var(--primary)}
+.btn.primary:hover{opacity:.9}
+
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);padding-bottom:0}
+.tab{font-family:inherit;font-size:12.5px;padding:7px 12px;border:0;background:transparent;
+  color:var(--muted-foreground);cursor:default;border-bottom:2px solid transparent;margin-bottom:-1px;
+  display:inline-flex;align-items:center;gap:5px}
+.tab.active{color:var(--foreground);border-bottom-color:var(--foreground);font-weight:500}
+
+.panel{border:1px solid var(--border);border-radius:10px;background:var(--card);padding:12px}
+.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.selectbox{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:6px 9px;
+  border:1px solid var(--border);border-radius:7px;background:var(--card);color:var(--foreground);cursor:pointer}
+.selectbox .val{color:var(--muted-foreground)}
+.search{position:relative;flex:1;min-width:180px;max-width:280px}
+.search input{width:100%;font-family:inherit;font-size:12px;padding:6px 9px 6px 28px;
+  border:1px solid var(--border);border-radius:7px;background:var(--card);color:var(--foreground);outline:none}
+.search input:focus{border-color:var(--brand);box-shadow:0 0 0 2px color-mix(in oklab,var(--brand) 22%,transparent)}
+.search svg{position:absolute;left:8px;top:50%;transform:translateY(-50%);color:var(--muted-foreground)}
+.spacer{flex:1}
+
+.hint{display:flex;gap:6px;align-items:flex-start;margin-top:10px;font-size:11px;line-height:16px;
+  color:var(--muted-foreground);background:color-mix(in oklab,var(--muted) 55%,transparent);
+  border:1px solid var(--border);border-radius:7px;padding:6px 9px}
+.hint svg{flex:0 0 auto;margin-top:2px}
+
+.filters{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.pill{font-family:inherit;font-size:11px;padding:3px 9px;border-radius:99px;border:1px solid var(--border);
+  background:transparent;color:var(--muted-foreground);cursor:pointer;display:inline-flex;gap:5px;align-items:center}
+.pill:hover{background:var(--muted)}
+.pill.active{background:var(--foreground);color:var(--background);border-color:var(--foreground)}
+.pill .n{opacity:.65;font-variant-numeric:tabular-nums}
+
+.table-wrap{margin-top:10px;border:1px solid var(--border);border-radius:8px;overflow:auto;max-height:calc(100vh - 330px)}
+table{width:100%;border-collapse:collapse;table-layout:fixed;min-width:860px}
+thead th{position:sticky;top:0;z-index:2;background:var(--card);text-align:left;font-size:11px;
+  font-weight:500;color:var(--muted-foreground);padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+tbody td{padding:8px 10px;border-bottom:1px solid color-mix(in oklab,var(--border) 55%,transparent);
+  vertical-align:top;font-size:12px}
+tbody tr.row{cursor:pointer}
+tbody tr.row:hover{background:var(--row-hover)}
+tbody tr.row.open{background:color-mix(in oklab,var(--brand) 6%,transparent)}
+.mid{display:flex;align-items:center;gap:6px;min-width:0}
+.mid .id{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.src-badge{font-size:9.5px;line-height:15px;padding:0 5px;border-radius:4px;flex:0 0 auto;
+  border:1px solid var(--border);color:var(--muted-foreground)}
+.src-badge.custom{border-color:color-mix(in oklab,var(--brand) 45%,transparent);color:var(--brand)}
+.tags{display:flex;flex-wrap:wrap;gap:4px}
+.tag{display:inline-flex;align-items:center;gap:4px;max-width:100%;font-size:10.5px;line-height:18px;
+  padding:0 6px;border-radius:99px;border:1px solid var(--un-bd);background:var(--un-bg);color:var(--un-fg);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tag .d{width:5px;height:5px;border-radius:99px;background:currentColor;flex:0 0 auto;opacity:.9}
+.tag.ok{background:var(--ok-bg);color:var(--ok-fg);border-color:var(--ok-bd)}
+.tag.warn{background:var(--warn-bg);color:var(--warn-fg);border-color:var(--warn-bd)}
+.tag.slow{background:var(--slow-bg);color:var(--slow-fg);border-color:var(--slow-bd)}
+.tag.fail{background:var(--fail-bg);color:var(--fail-fg);border-color:var(--fail-bd)}
+.tag.more{background:transparent;border-style:dashed;color:var(--muted-foreground)}
+.num{font-variant-numeric:tabular-nums}
+.dim{color:var(--muted-foreground)}
+.health{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;white-space:nowrap}
+.health .d{width:6px;height:6px;border-radius:99px;flex:0 0 auto}
+.health.ok .d{background:var(--ok-fg)}.health.ok{color:var(--ok-fg)}
+.health.warn .d{background:var(--warn-fg)}.health.warn{color:var(--warn-fg)}
+.health.slow .d{background:var(--slow-fg)}.health.slow{color:var(--slow-fg)}
+.health.fail .d{background:var(--fail-fg)}.health.fail{color:var(--fail-fg)}
+.health.untested .d{background:var(--un-fg);opacity:.6}.health.untested{color:var(--muted-foreground)}
+.health .at{color:var(--muted-foreground);font-size:10px}
+.row-actions{display:flex;gap:2px;justify-content:flex-end}
+.detail-row td{padding:0;background:color-mix(in oklab,var(--muted) 35%,transparent)}
+.expand{padding:10px 12px;display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:14px}
+.expand h4{margin:0 0 6px;font-size:10.5px;font-weight:500;color:var(--muted-foreground);letter-spacing:.02em}
+.kv{font-size:11.5px;line-height:20px;display:flex;gap:8px}
+.kv .k{color:var(--muted-foreground);flex:0 0 58px}
+.kv .v{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.empty{padding:46px 20px;text-align:center}
+.empty .ico{width:38px;height:38px;border-radius:10px;border:1px dashed var(--border);
+  display:grid;place-items:center;margin:0 auto 12px;color:var(--muted-foreground)}
+.empty h3{margin:0 0 6px;font-size:13.5px;font-weight:500}
+.empty p{margin:0 auto 14px;font-size:12px;line-height:19px;color:var(--muted-foreground);max-width:340px}
+.empty .acts{display:flex;gap:8px;justify-content:center}
+.errbar{margin-top:10px;border:1px solid var(--fail-bd);background:var(--fail-bg);color:var(--fail-fg);
+  border-radius:8px;padding:8px 10px;font-size:11.5px;display:flex;align-items:center;gap:8px}
+
+.overlay{position:absolute;inset:0;background:rgba(0,0,0,.45);opacity:0;pointer-events:none;
+  transition:opacity .2s;z-index:40}
+.overlay.show{opacity:1;pointer-events:auto}
+.drawer{position:absolute;top:0;right:0;bottom:0;width:540px;max-width:92vw;z-index:50;
+  background:var(--card);border-left:1px solid var(--border);transform:translateX(100%);
+  transition:transform .22s cubic-bezier(.32,.72,0,1);display:flex;flex-direction:column}
+.drawer.show{transform:translateX(0)}
+.d-head{padding:14px 16px 10px;border-bottom:1px solid var(--border)}
+.d-top{display:flex;align-items:flex-start;gap:8px}
+.d-top h2{margin:0;font-size:14px;font-weight:500;word-break:break-all}
+.d-sub{margin-top:5px;font-size:11.5px;color:var(--muted-foreground);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.d-tabs{display:flex;gap:2px;margin-top:10px}
+.d-tab{font-family:inherit;font-size:11.5px;padding:5px 9px;border:0;border-radius:6px;background:transparent;
+  color:var(--muted-foreground);cursor:pointer}
+.d-tab.active{background:var(--muted);color:var(--foreground);font-weight:500}
+.d-body{padding:14px 16px;overflow:auto;flex:1}
+.d-body h3{margin:0 0 8px;font-size:11px;font-weight:500;color:var(--muted-foreground)}
+.sec{margin-bottom:18px}
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat{border:1px solid var(--border);border-radius:8px;padding:8px 10px}
+.stat .l{font-size:10.5px;color:var(--muted-foreground)}
+.stat .v{font-size:15px;font-weight:500;margin-top:3px;font-variant-numeric:tabular-nums}
+.stat .v small{font-size:10.5px;font-weight:400;color:var(--muted-foreground);margin-left:3px}
+.mini-table{width:100%;border-collapse:collapse;min-width:0}
+.mini-table th{font-size:10px;font-weight:500;color:var(--muted-foreground);text-align:left;padding:5px 6px;
+  border-bottom:1px solid var(--border);white-space:nowrap}
+.mini-table td{font-size:11px;padding:6px;border-bottom:1px solid color-mix(in oklab,var(--border) 55%,transparent)}
+.bars{display:flex;align-items:flex-end;gap:5px;height:74px;margin-top:8px}
+.bars .b{flex:1;background:color-mix(in oklab,var(--brand) 55%,transparent);border-radius:3px 3px 0 0;min-height:2px}
+.bars .b.peak{background:var(--brand)}
+.bar-labels{display:flex;gap:5px;margin-top:4px}
+.bar-labels span{flex:1;text-align:center;font-size:9.5px;color:var(--muted-foreground)}
+.win{display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:10px}
+.win button{font-family:inherit;font-size:10.5px;padding:3px 8px;border:0;background:transparent;
+  color:var(--muted-foreground);cursor:pointer}
+.win button.active{background:var(--muted);color:var(--foreground)}
+.code{font-family:ui-monospace,Menlo,monospace;font-size:11px;background:var(--muted);border-radius:6px;
+  padding:7px 9px;line-height:18px;word-break:break-all;color:var(--foreground)}
+.note{font-size:10.5px;line-height:16px;color:var(--muted-foreground);margin-top:6px}
+.d-foot{border-top:1px solid var(--border);padding:10px 16px;display:flex;gap:8px;justify-content:flex-end}
+
+body.annotate [data-new]{outline:1px dashed var(--brand);outline-offset:2px;border-radius:6px}
+.legend{display:none;align-items:center;gap:6px;font-size:11px;color:var(--brand)}
+body.annotate .legend{display:inline-flex}
+.legend .sw{width:14px;height:9px;border:1px dashed var(--brand);border-radius:3px}
+@media (max-width:1080px){
+  .sidebar{display:none}
+  .expand{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<h2 class="sr-only">分组内模型信息查看功能的交互原型，包含侧栏模型数入口、模型列表新增列与详情抽屉</h2>
+
+<header class="topbar">
+  <div class="brand"><span class="mark"></span>Upstream Ops</div>
+  <nav class="nav">
+    <span class="nav-item active">网关</span>
+    <span class="nav-item">直连渠道</span>
+    <span class="nav-item">使用记录</span>
+    <span class="nav-item">价格覆盖</span>
+  </nav>
+  <div class="top-right">
+    <span class="legend"><span class="sw"></span>虚线框 = 本次新增</span>
+    <span class="tagline">原型 · 方案 B</span>
+    <button class="toggle" id="annotBtn">标注新增</button>
+    <button class="toggle" id="themeBtn">浅色</button>
+  </div>
+</header>
+
+<div class="workspace">
+  <aside class="sidebar">
+    <div class="card">
+      <div class="card-head">
+        <h2>网关组</h2>
+        <button class="mini-btn">+ 新建</button>
+      </div>
+      <div class="group-list" id="groupList"></div>
+      <div class="side-note">
+        <b>L0 入口</b>：侧栏只放「模型 N」数字，点击 = 选中分组并切到模型 tab。不在侧栏展开列表。
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="group-head">
+      <div>
+        <h1 id="gName">主力生产</h1>
+        <div class="sub" id="gSub"></div>
+      </div>
+      <div class="head-actions">
+        <button class="btn">编辑分组</button>
+        <button class="btn primary">保存</button>
+      </div>
+    </div>
+
+    <nav class="tabs">
+      <span class="tab">密钥</span>
+      <span class="tab">渠道路由</span>
+      <span class="tab active">模型映射</span>
+      <span class="tab">请求策略</span>
+      <span class="tab">提示词注入</span>
+    </nav>
+
+    <section class="panel">
+      <div class="toolbar">
+        <span class="selectbox"><span class="val">hybrid · 聚合∪自定义</span>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+        </span>
+        <div class="search">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input id="q" placeholder="搜索模型 / 上游模型名" autocomplete="off">
+        </div>
+        <span class="spacer"></span>
+        <button class="btn">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+          从渠道同步
+        </button>
+        <button class="btn">+ 添加自定义模型</button>
+      </div>
+
+      <div class="hint">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+        <span id="hintText">当前为实时聚合模式，本列表是 2026-10-27 13:40 的快照，仅供管理参考；<code class="mono">/v1/models</code> 仍按上游实时聚合。</span>
+      </div>
+
+      <div class="filters" id="filters"></div>
+      <div id="tableHost"></div>
+    </section>
+  </main>
+</div>
+
+<div class="overlay" id="overlay"></div>
+<aside class="drawer" id="drawer" aria-hidden="true"></aside>
+
+<script>
+const PROBES = {
+  ok:(ms)=>({ok:true,ms}),
+  fail:(status,err)=>({ok:false,status,err}),
+};
+
+const GROUPS = [
+  {
+    id:3, name:"主力生产", status:"active", mode:"hybrid",
+    desc:"对外正式流量，OpenAI + Anthropic 双线", snapshot:"2026-10-27 13:40",
+    routes:6,
+    models:[
+      {id:"gpt-4o", source:"sync", billing:"token", req24:1204, cost24:3.42, tokens24:812334, last:"2 分钟前",
+       rate7d:"99.4%", price:"$2.50 / $10.00", chain:"gpt-4o → (无映射) → gpt-4o-2024-08-06",
+       days:[62,88,74,96,58,70,84],
+       sources:[
+         {route:12, channel:"新API-主站", sgroup:"default", weight:10, mult:0.85, enabled:true, paused:false, upstream:"gpt-4o-2024-08-06", probe:{ok:true,ms:1180,at:"13:35"}},
+         {route:15, channel:"Sub2API-备用", sgroup:"vip", weight:5, mult:1.0, enabled:true, paused:false, upstream:"gpt-4o", probe:{ok:true,ms:2340,at:"13:35"}},
+         {route:19, channel:"新API-香港", sgroup:"hk", weight:3, mult:1.2, enabled:true, paused:true, upstream:"gpt-4o", probe:{ok:false,status:503,err:"upstream status 503",at:"13:35"}},
+         {route:22, channel:"直连-Azure", sgroup:"", weight:1, mult:1.1, enabled:false, paused:false, upstream:"gpt-4o", probe:null}
+       ]},
+      {id:"gpt-4o-mini", source:"sync", billing:"token", req24:8931, cost24:2.10, tokens24:2140881, last:"12 秒前",
+       rate7d:"99.9%", price:"$0.15 / $0.60", chain:"gpt-4o-mini → (无映射) → gpt-4o-mini",
+       days:[91,84,96,88,99,94,97],
+       sources:[
+         {route:12, channel:"新API-主站", sgroup:"default", weight:10, mult:0.85, enabled:true, paused:false, upstream:"gpt-4o-mini", probe:{ok:true,ms:820,at:"13:35"}},
+         {route:15, channel:"Sub2API-备用", sgroup:"vip", weight:5, mult:1.0, enabled:true, paused:false, upstream:"gpt-4o-mini", probe:{ok:true,ms:1410,at:"13:35"}}
+       ]},
+      {id:"claude-3-5-sonnet-20241022", source:"sync", billing:"token", req24:412, cost24:6.88, tokens24:1204331, last:"5 分钟前",
+       rate7d:"97.1%", price:"$3.00 / $15.00", chain:"claude-3-5-sonnet-20241022 → sonnet-latest → claude-3-5-sonnet-20241022",
+       days:[42,55,38,61,47,52,44],
+       sources:[
+         {route:15, channel:"Sub2API-备用", sgroup:"vip", weight:8, mult:1.0, enabled:true, paused:false, upstream:"claude-3-5-sonnet-20241022", probe:{ok:true,ms:2340,at:"13:35"}},
+         {route:31, channel:"直连-Anthropic", sgroup:"", weight:2, mult:1.15, enabled:true, paused:false, upstream:"claude-3-5-sonnet-latest", probe:{ok:true,ms:3120,at:"13:34"}}
+       ]},
+      {id:"deepseek-chat", source:"sync", billing:"token", req24:20455, cost24:1.02, tokens24:9033421, last:"刚刚",
+       rate7d:"98.2%", price:"$0.27 / $1.10", chain:"deepseek-chat → (无映射) → deepseek-chat",
+       days:[78,83,90,86,94,88,92],
+       sources:[
+         {route:41, channel:"新API-低价", sgroup:"batch", weight:10, mult:0.6, enabled:true, paused:false, upstream:"deepseek-chat", probe:{ok:true,ms:8600,at:"13:36"}},
+         {route:42, channel:"Sub2API-低价", sgroup:"batch", weight:6, mult:0.62, enabled:true, paused:false, upstream:"deepseek-chat", probe:{ok:true,ms:9100,at:"13:36"}},
+         {route:43, channel:"直连-DeepSeek", sgroup:"", weight:2, mult:1.0, enabled:true, paused:false, upstream:"deepseek-chat", probe:{ok:true,ms:11200,at:"13:36"}}
+       ]},
+      {id:"dall-e-3", source:"sync", billing:"image", req24:6, cost24:0.24, tokens24:0, last:"3 小时前",
+       rate7d:"100%", price:"$0.040 / 张（1K）", chain:"dall-e-3 → (无映射) → dall-e-3",
+       days:[8,14,6,0,10,4,6],
+       sources:[
+         {route:12, channel:"新API-主站", sgroup:"default", weight:1, mult:1.0, enabled:true, paused:false, upstream:"dall-e-3", probe:{ok:true,ms:3420,at:"13:35"}}
+       ]},
+      {id:"text-embedding-3-large", source:"sync", billing:"token", req24:0, cost24:0, tokens24:0, last:null,
+       rate7d:"—", price:"$0.13 / $0.00", chain:"text-embedding-3-large → (无映射) → text-embedding-3-large",
+       days:[0,0,0,0,0,0,0],
+       sources:[
+         {route:12, channel:"新API-主站", sgroup:"default", weight:1, mult:0.85, enabled:true, paused:false, upstream:"text-embedding-3-large", probe:null}
+       ]},
+      {id:"my-internal-llm", source:"custom", billing:"token", req24:0, cost24:0, tokens24:0, last:null,
+       rate7d:"—", price:"未配置（按默认价目）", chain:"my-internal-llm → (无映射)",
+       days:[0,0,0,0,0,0,0], sources:[]},
+      {id:"o1-preview", source:"sync", billing:"token", req24:12, cost24:1.90, tokens24:24110, last:"1 天前",
+       rate7d:"33.3%", price:"$15.00 / $60.00", chain:"o1-preview → (无映射) → o1-preview",
+       days:[30,42,0,18,0,0,12],
+       sources:[
+         {route:19, channel:"新API-香港", sgroup:"hk", weight:1, mult:1.2, enabled:true, paused:false, upstream:"o1-preview", probe:{ok:false,status:404,err:"model not found: o1-preview",at:"13:35"}}
+       ]}
+    ]
+  },
+  {
+    id:7, name:"灰度测试", status:"active", mode:"manual",
+    desc:"新渠道验证，仅放开给测试 Key", snapshot:"2026-10-26 22:10",
+    routes:2,
+    models:[
+      {id:"gpt-4o-mini", source:"sync", billing:"token", req24:88, cost24:0.02, tokens24:20411, last:"40 分钟前",
+       rate7d:"100%", price:"$0.15 / $0.60", chain:"gpt-4o-mini → (无映射) → gpt-4o-mini",
+       days:[10,14,8,16,12,18,10],
+       sources:[
+         {route:51, channel:"测试渠道-A", sgroup:"default", weight:1, mult:1.0, enabled:true, paused:false, upstream:"gpt-4o-mini", probe:{ok:true,ms:1960,at:"12:50"}}
+       ]},
+      {id:"gemini-1.5-pro", source:"sync", billing:"token", req24:0, cost24:0, tokens24:0, last:null,
+       rate7d:"—", price:"未配置（按默认价目）", chain:"gemini-1.5-pro → (无映射) → gemini-1.5-pro",
+       days:[0,0,0,0,0,0,0],
+       sources:[
+         {route:52, channel:"测试渠道-B", sgroup:"default", weight:1, mult:1.05, enabled:true, paused:false, upstream:"gemini-1.5-pro", probe:null}
+       ]},
+      {id:"claude-3-haiku", source:"custom", billing:"token", req24:0, cost24:0, tokens24:0, last:null,
+       rate7d:"—", price:"未配置（按默认价目）", chain:"claude-3-haiku → (无映射)",
+       days:[0,0,0,0,0,0,0], sources:[]}
+    ]
+  },
+  {
+    id:9, name:"新分组", status:"disabled", mode:"auto",
+    desc:"", snapshot:null, routes:0, models:[]
+  }
+];
+
+let state = {groupId:3, filter:"all", q:"", open:null, drawer:null, dtab:"概览", win:"24h"};
+
+const $ = (s)=>document.querySelector(s);
+const esc = (s)=>String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const group = ()=>GROUPS.find(g=>g.id===state.groupId);
+const fmt = (n)=>n>=10000 ? (n/10000).toFixed(1)+" 万" : n.toLocaleString("zh-CN");
+
+function sourceTone(p){
+  if(!p) return "untested";
+  if(!p.ok) return "fail";
+  if(p.ms<=5000) return "ok";
+  if(p.ms<=10000) return "warn";
+  return "slow";
+}
+function health(m){
+  const ps = m.sources.map(s=>s.probe).filter(Boolean);
+  if(!ps.length) return {t:"untested", label:"未测试"};
+  const ok = ps.filter(p=>p.ok).sort((a,b)=>a.ms-b.ms)[0];
+  if(ok) return {t:sourceTone(ok), label:`通过 ${(ok.ms/1000).toFixed(1)}s`, at:ok.at};
+  const bad = ps[0];
+  return {t:"fail", label:"失败", err:bad.err || ("HTTP "+bad.status)};
+}
+function counts(m){
+  let en=0, pa=0, dis=0;
+  m.sources.forEach(s=>{
+    if(s.enabled && !s.paused) en++;
+    else if(s.enabled && s.paused) pa++;
+    else dis++;
+  });
+  return {en,pa,dis};
+}
+
+function renderSidebar(){
+  $("#groupList").innerHTML = GROUPS.map(g=>{
+    const sel = g.id===state.groupId;
+    const n = g.models.length;
+    return `<div class="group-item ${sel?"selected":""}" data-gid="${g.id}">
+      <div class="g-line1">
+        <span class="g-name">${esc(g.name)}</span>
+        <span class="badge ${g.status==="active"?"active":"disabled"}">${g.status==="active"?"启用":"禁用"}</span>
+        <span class="chip-models" ${sel?'data-new':''}>模型 ${n}</span>
+      </div>
+      <div class="g-desc">${g.desc?esc(g.desc):'<span class="none">无描述</span>'}</div>
+      <div class="g-actions">
+        <button class="icon-btn" title="拖动排序"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg></button>
+        <button class="icon-btn" title="编辑"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+        <button class="icon-btn danger" title="删除"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function filtered(){
+  const g = group();
+  let list = g.models.slice();
+  const q = state.q.trim().toLowerCase();
+  if(q) list = list.filter(m=>m.id.toLowerCase().includes(q) ||
+    m.sources.some(s=>(s.upstream||"").toLowerCase().includes(q)));
+  if(state.filter==="used") list = list.filter(m=>m.req24>0);
+  if(state.filter==="zero") list = list.filter(m=>m.req24===0);
+  if(state.filter==="untested") list = list.filter(m=>health(m).t==="untested");
+  if(state.filter==="error") list = list.filter(m=>health(m).t==="fail");
+  return list;
+}
+
+function renderFilters(){
+  const g = group();
+  const all = g.models.length;
+  const used = g.models.filter(m=>m.req24>0).length;
+  const zero = all-used;
+  const untested = g.models.filter(m=>health(m).t==="untested").length;
+  const error = g.models.filter(m=>health(m).t==="fail").length;
+  const defs = [["all","全部",all],["used","有调用",used],["zero","零调用",zero],["untested","未测试",untested],["error","有异常",error]];
+  $("#filters").innerHTML = defs.map(([k,l,n])=>
+    `<button class="pill ${state.filter===k?"active":""}" data-f="${k}">${l}<span class="n">${n}</span></button>`
+  ).join("");
+}
+
+function renderTable(){
+  const g = group();
+  $("#gName").textContent = g.name;
+  $("#gSub").innerHTML = `${g.models.length} 个模型 · ${g.routes} 条路由 · 模式 <span class="mono">${g.mode}</span>`
+    + (g.status==="disabled"?' · <span style="color:var(--fail-fg)">分组已禁用</span>':"");
+
+  const hints = {
+    auto: g.snapshot
+      ? `当前为实时聚合模式，本列表是 <b>${g.snapshot}</b> 的快照，仅供管理参考；<code class="mono">/v1/models</code> 仍按上游实时聚合。`
+      : `当前为实时聚合模式，尚未同步过模型，暂无快照；<code class="mono">/v1/models</code> 按上游实时聚合。`,
+    manual:`manual 模式：<code class="mono">/v1/models</code> 只返回本列表内容，未同步或未添加的模型不会对外暴露。`,
+    hybrid:`hybrid 模式：对外目录 = 上游实时聚合 ∪ 下方「自定义」模型；同步项不会额外并入。本列表快照于 <b>${g.snapshot||"—"}</b>。`
+  };
+  $("#hintText").innerHTML = hints[g.mode] || hints.auto;
+  $("#filters").style.display = g.models.length ? "" : "none";
+
+  if(!g.models.length){
+    $("#tableHost").innerHTML = `<div class="empty">
+      <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l9 5-9 5-9-5 9-5Z"/><path d="M3 13l9 5 9-5"/></svg></div>
+      <h3>该分组还没有模型</h3>
+      <p>这个分组下还没有渠道路由。先到「渠道路由」添加来源，再回来点「从渠道同步」拉取上游模型。</p>
+      <div class="acts"><button class="btn primary">去添加路由</button><button class="btn">从渠道同步</button></div>
+    </div>`;
+    return;
+  }
+
+  const list = filtered();
+  if(!list.length){
+    $("#tableHost").innerHTML = `<div class="empty">
+      <h3>没有匹配的模型</h3><p>当前筛选条件下没有结果。试试清空搜索或切回「全部」。</p>
+      <div class="acts"><button class="btn" id="clearFilter">清空筛选</button></div></div>`;
+    const b = document.getElementById("clearFilter");
+    if(b) b.onclick = ()=>{state.q="";state.filter="all";$("#q").value="";renderFilters();renderTable();};
+    return;
+  }
+
+  const rows = list.map(m=>{
+    const h = health(m);
+    const c = counts(m);
+    const tags = m.sources.slice(0,3).map(s=>{
+      const label = s.sgroup && !/^id:\d+$/.test(s.sgroup) ? `${s.channel}-${s.sgroup}` : s.channel;
+      const t = sourceTone(s.probe);
+      return `<span class="tag ${t}" title="${esc(label)}${s.paused?" · 已暂停":""}">${esc(label)}</span>`;
+    }).join("");
+    const more = m.sources.length>3 ? `<span class="tag more">+${m.sources.length-3}</span>` : "";
+    const srcCell = m.sources.length
+      ? `<div class="tags">${tags}${more}</div>`
+      : `<span class="dim" style="font-size:11px">未绑定来源</span>`;
+    const healthCell = h.t==="fail"
+      ? `<span class="health fail" title="${esc(h.err)}"><span class="d"></span>失败</span><div class="at dim" style="font-size:10px;margin-top:2px">${esc(h.err)}</div>`
+      : h.t==="untested"
+        ? `<span class="health untested"><span class="d"></span>未测试</span>`
+        : `<span class="health ${h.t}"><span class="d"></span>${h.label}</span><div class="at dim" style="font-size:10px;margin-top:2px">${h.at}</div>`;
+    const isOpen = state.open===m.id;
+    const detail = isOpen ? `<tr class="detail-row"><td colspan="7">
+      <div class="expand">
+        <div>
+          <h4>来源（全部 ${m.sources.length} 条）</h4>
+          ${m.sources.length ? m.sources.map(s=>`<div class="kv"><span class="k mono">#${s.route}</span>
+            <span class="v">${esc(s.channel)}${s.sgroup?` · ${esc(s.sgroup)}`:""} · 权重 ${s.weight}${s.paused?" · 已暂停":""}${s.enabled?"":" · 已禁用"}</span></div>`).join("")
+            : `<div class="kv"><span class="v dim">该模型是手工添加，尚未绑定任何路由</span></div>`}
+        </div>
+        <div>
+          <h4>24 小时用量</h4>
+          <div class="kv"><span class="k">请求</span><span class="v num">${m.req24?fmt(m.req24):"—"}</span></div>
+          <div class="kv"><span class="k">Token</span><span class="v num">${m.tokens24?fmt(m.tokens24):"—"}</span></div>
+          <div class="kv"><span class="k">费用</span><span class="v num">${m.cost24?"$"+m.cost24.toFixed(2):"—"}</span></div>
+          <div class="kv"><span class="k">最近</span><span class="v">${m.last||"—"}</span></div>
+        </div>
+        <div>
+          <h4>探测</h4>
+          ${m.sources.some(s=>s.probe)
+            ? `<div class="kv"><span class="k">结果</span><span class="v">${h.t==="fail"?"失败":h.label}</span></div>
+               <div class="kv"><span class="k">时间</span><span class="v">${h.at||"—"}</span></div>`
+            : `<div class="kv"><span class="v dim">尚未探测。点「测试」会真实请求上游并可能产生费用。</span></div>`}
+          <div class="kv"><span class="k">计费</span><span class="v">${m.billing}</span></div>
+        </div>
+      </div></td></tr>` : "";
+
+    return `<tr class="row ${isOpen?"open":""}" data-mid="${esc(m.id)}">
+      <td><div class="mid">
+        <span class="id mono" title="${esc(m.id)}">${esc(m.id)}</span>
+        <span class="src-badge ${m.source==="custom"?"custom":""}">${m.source==="custom"?"自定义":"同步"}</span>
+      </div></td>
+      <td>${srcCell}</td>
+      <td ${'data-new'}><span class="num">${c.en} 启用</span>${(c.pa||c.dis)?`<div class="dim" style="font-size:10px;margin-top:1px">${c.pa?c.pa+" 暂停":""}${(c.pa&&c.dis)?" · ":""}${c.dis?c.dis+" 禁用":""}</div>`:""}</td>
+      <td ${'data-new'}><span class="num">${m.req24?m.req24.toLocaleString("zh-CN"):'<span class="dim">—</span>'}</span></td>
+      <td ${'data-new'}><span class="dim">${m.last||"—"}</span></td>
+      <td ${'data-new'}>${healthCell}</td>
+      <td><div class="row-actions">
+        <button class="icon-btn" data-act="test" title="测试（会真实请求上游）"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3"/></svg></button>
+        <button class="icon-btn" data-act="detail" data-new title="详情"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></button>
+      </div></td>
+    </tr>${detail}`;
+  }).join("");
+
+  $("#tableHost").innerHTML = `<div class="table-wrap"><table>
+    <colgroup><col style="width:23%"><col style="width:24%"><col style="width:11%"><col style="width:10%"><col style="width:10%"><col style="width:14%"><col style="width:8%"></colgroup>
+    <thead><tr>
+      <th>模型 ID</th><th>渠道-分组</th>
+      <th data-new>可用来源</th><th data-new>24h 调用</th><th data-new>最近调用</th><th data-new>可用性</th><th style="text-align:right">操作</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>
+  <div class="note" style="margin-top:8px">显示 ${list.length} / ${g.models.length} 个模型 · 点行展开摘要，点 <b>ⓘ</b> 打开详情抽屉</div>`;
+}
+
+function renderDrawer(){
+  const d = $("#drawer");
+  if(!state.drawer){ d.classList.remove("show"); d.setAttribute("aria-hidden","true"); $("#overlay").classList.remove("show"); return; }
+  const g = group();
+  const m = g.models.find(x=>x.id===state.drawer);
+  if(!m){ state.drawer=null; return; }
+  const h = health(m);
+  const c = counts(m);
+
+  const tabs = ["概览","来源明细","用量","映射与计费"];
+  const bodyMap = {
+    "概览": `
+      <div class="sec"><h3>基本信息</h3>
+        <div class="kv"><span class="k">模型 ID</span><span class="v mono">${esc(m.id)}</span></div>
+        <div class="kv"><span class="k">来源</span><span class="v">${m.source==="custom"?"自定义（手工添加）":"同步（来自上游 /v1/models）"}</span></div>
+        <div class="kv"><span class="k">计费模式</span><span class="v">${m.billing}</span></div>
+        <div class="kv"><span class="k">可用来源</span><span class="v">${c.en} 启用${c.pa?" / "+c.pa+" 暂停":""}${c.dis?" / "+c.dis+" 禁用":""}</span></div>
+      </div>
+      <div class="sec"><h3>可用性</h3>
+        <div class="stat-grid">
+          <div class="stat"><div class="l">最近探测</div><div class="v" style="color:${h.t==="fail"?"var(--fail-fg)":h.t==="untested"?"var(--muted-foreground)":"var(--ok-fg)"}">${h.t==="fail"?"失败":h.t==="untested"?"未测试":h.label}</div></div>
+          <div class="stat"><div class="l">近 7 天成功率</div><div class="v">${m.rate7d}</div></div>
+        </div>
+        ${h.err?`<div class="note">错误：${esc(h.err)}</div>`:""}
+        <div class="note">探测是触发式行为，会真实请求上游并可能产生费用；这里只展示最近一次结果，不代表当前一定可用。</div>
+      </div>`,
+    "来源明细": m.sources.length ? `
+      <div class="sec"><h3>路由来源（${m.sources.length} 条）</h3>
+      <table class="mini-table"><thead><tr>
+        <th>路由</th><th>渠道 / 源分组</th><th>权重</th><th>倍率</th><th>状态</th><th>上游模型</th>
+      </tr></thead><tbody>
+      ${m.sources.map(s=>`<tr>
+        <td class="mono">#${s.route}</td>
+        <td>${esc(s.channel)}${s.sgroup?`<div class="dim" style="font-size:10px">${esc(s.sgroup)}</div>`:""}</td>
+        <td class="num">${s.weight}</td>
+        <td class="num">${s.mult.toFixed(2)}</td>
+        <td>${s.paused?'<span style="color:var(--warn-fg)">暂停</span>':s.enabled?'<span style="color:var(--ok-fg)">启用</span>':'<span class="dim">禁用</span>'}</td>
+        <td class="mono" style="font-size:10px">${esc(s.upstream)}</td>
+      </tr>`).join("")}
+      </tbody></table>
+      <div class="note">来源是同步时的快照。渠道或路由被删除后这里仍会保留记录，便于追溯历史调用。</div></div>`
+      : `<div class="sec"><h3>来源明细</h3><div class="note">该模型没有绑定任何来源。手工添加的模型需要先在「渠道路由」里配置对应路由，才会真正可调用。</div></div>`,
+    "用量": `
+      <div class="sec"><h3>调用量</h3>
+        <div class="win">${["24h","7d","30d"].map(w=>`<button class="${state.win===w?"active":""}" data-win="${w}">${w}</button>`).join("")}</div>
+        <div class="stat-grid">
+          <div class="stat"><div class="l">请求数</div><div class="v">${m.req24?fmt(Math.round(m.req24*{ "24h":1,"7d":6.4,"30d":24 }[state.win])):"—"}</div></div>
+          <div class="stat"><div class="l">费用</div><div class="v">${m.cost24?"$"+(m.cost24*{"24h":1,"7d":6.4,"30d":24}[state.win]).toFixed(2):"—"}</div></div>
+          <div class="stat"><div class="l">Token</div><div class="v">${m.tokens24?fmt(Math.round(m.tokens24*{"24h":1,"7d":6.4,"30d":24}[state.win])):"—"}</div></div>
+          <div class="stat"><div class="l">成功率</div><div class="v">${m.rate7d}</div></div>
+        </div>
+        <div class="bars">${m.days.map(v=>`<div class="b ${v>85?"peak":""}" style="height:${Math.max(v,2)}%"></div>`).join("")}</div>
+        <div class="bar-labels">${["一","二","三","四","五","六","日"].map(d=>`<span>${d}</span>`).join("")}</div>
+        <div class="note">零调用显示「—」而不是「0」，用于区分「从未调用」与「统计未开启」。</div>
+      </div>`,
+    "映射与计费": `
+      <div class="sec"><h3>模型映射链</h3>
+        <div class="code">${esc(m.chain)}</div>
+        <div class="note">组级映射在前、路由级映射在后；链上的每一跳都会写进使用记录的 model_mapping_chain。</div>
+      </div>
+      <div class="sec"><h3>价目表</h3>
+        <div class="kv"><span class="k">单价</span><span class="v">${esc(m.price)}</span></div>
+        <div class="kv"><span class="k">计费模式</span><span class="v">${m.billing}</span></div>
+        <div class="note">这是全局价目表单价，不含路由的计费倍率；实际扣费以使用记录为准。</div>
+      </div>`
+  };
+
+  d.innerHTML = `
+    <div class="d-head">
+      <div class="d-top">
+        <div style="flex:1;min-width:0">
+          <h2 class="mono">${esc(m.id)}</h2>
+          <div class="d-sub">
+            <span class="src-badge ${m.source==="custom"?"custom":""}">${m.source==="custom"?"自定义":"同步"}</span>
+            <span>${c.en} 个可用来源</span><span>·</span><span>${m.billing}</span><span>·</span>
+            <span class="health ${h.t}"><span class="d"></span>${h.t==="fail"?"失败":h.t==="untested"?"未测试":h.label}</span>
+          </div>
+        </div>
+        <button class="icon-btn" id="closeDrawer" title="关闭">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="d-tabs">${tabs.map(t=>`<button class="d-tab ${state.dtab===t?"active":""}" data-dtab="${t}">${t}</button>`).join("")}</div>
+    </div>
+    <div class="d-body">${bodyMap[state.dtab]}</div>
+    <div class="d-foot">
+      <button class="btn">测试可用性</button>
+      <button class="btn primary">编辑映射</button>
+    </div>`;
+  d.classList.add("show");
+  d.setAttribute("aria-hidden","false");
+  $("#overlay").classList.add("show");
+}
+
+function renderAll(){ renderSidebar(); renderFilters(); renderTable(); renderDrawer(); }
+
+document.addEventListener("click",(e)=>{
+  const gi = e.target.closest(".group-item");
+  if(gi){ state.groupId = Number(gi.dataset.gid); state.open=null; state.drawer=null; state.filter="all"; state.q=""; $("#q").value=""; renderAll(); return; }
+
+  const f = e.target.closest(".pill");
+  if(f){ state.filter=f.dataset.f; renderFilters(); renderTable(); return; }
+
+  const act = e.target.closest("[data-act]");
+  if(act){
+    const tr = act.closest("tr");
+    const mid = tr.dataset.mid;
+    if(act.dataset.act==="detail"){ state.drawer=mid; state.dtab="概览"; renderDrawer(); }
+    if(act.dataset.act==="test"){
+      act.style.opacity=".45";
+      setTimeout(()=>{act.style.opacity="";},600);
+    }
+    return;
+  }
+
+  const row = e.target.closest("tr.row");
+  if(row){ state.open = state.open===row.dataset.mid ? null : row.dataset.mid; renderTable(); return; }
+
+  const dt = e.target.closest("[data-dtab]");
+  if(dt){ state.dtab=dt.dataset.dtab; renderDrawer(); return; }
+
+  const win = e.target.closest("[data-win]");
+  if(win){ state.win=win.dataset.win; renderDrawer(); return; }
+
+  if(e.target.closest("#closeDrawer") || e.target.id==="overlay"){
+    state.drawer=null; renderDrawer();
+  }
+});
+
+document.addEventListener("keydown",(e)=>{
+  if(e.key==="Escape" && state.drawer){ state.drawer=null; renderDrawer(); }
+});
+
+$("#q").addEventListener("input",(e)=>{ state.q=e.target.value; renderTable(); });
+
+$("#themeBtn").onclick = ()=>{
+  const dark = document.documentElement.classList.toggle("dark");
+  $("#themeBtn").textContent = dark ? "浅色" : "深色";
+};
+$("#annotBtn").onclick = ()=>{
+  const on = document.body.classList.toggle("annotate");
+  $("#annotBtn").classList.toggle("on", on);
+};
+
+const hash = location.hash.replace("#","");
+if(hash==="expand") state.open = "gpt-4o";
+if(hash==="drawer") state.drawer = "gpt-4o";
+if(hash==="empty") state.groupId = 9;
+if(hash==="annotate"){ document.body.classList.add("annotate"); $("#annotBtn").classList.add("on"); }
+if(hash==="light"){ document.documentElement.classList.remove("dark"); $("#themeBtn").textContent="深色"; }
+
+renderAll();
+</script>
+</body>
+</html>

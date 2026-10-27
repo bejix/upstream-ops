@@ -68,3 +68,7 @@ cmd/seed-demo/
 frontend/tsconfig.tsbuildinfo
 
 docs/md
+.workbuddy-ai
+
+# 本地部署数据（含 appSecret / 管理员密码 / SQLite 库），永远不进 git
+部署环境数据/

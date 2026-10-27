@@ -81,14 +81,17 @@ func TestRefreshRatesSyncAnnouncementsAndNotify(t *testing.T) {
 	}
 
 	var statusCalls atomic.Int32
+	// 公告版本由测试显式推进：GetRates 也会请求 /api/status（取分组倍率展示口径），
+	// 用调用次数判断"第几次刷新"会失真。
+	var announcementVersion atomic.Int32
 	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/status":
-			call := statusCalls.Add(1)
+			statusCalls.Add(1)
 			id := 1
 			title := "公告一"
 			content := "首次公告"
-			if call >= 2 {
+			if announcementVersion.Load() >= 2 {
 				id = 2
 				title = "公告二"
 				content = "新增公告"
@@ -139,6 +142,7 @@ func TestRefreshRatesSyncAnnouncementsAndNotify(t *testing.T) {
 		t.Fatalf("first refresh webhook hits = %d, want 0", got)
 	}
 
+	announcementVersion.Store(2)
 	if err := svc.RefreshRates(context.Background(), ch); err != nil {
 		t.Fatalf("second refresh: %v", err)
 	}
@@ -230,8 +234,10 @@ func TestRefreshRatesSkipsAnnouncementsWhenIgnored(t *testing.T) {
 	if total != 0 || len(list) != 0 {
 		t.Fatalf("announcements should be skipped: total=%d list=%#v", total, list)
 	}
-	if got := statusCalls.Load(); got != 0 {
-		t.Fatalf("status calls = %d, want 0", got)
+	// GetRates 也会请求一次 /api/status（取分组倍率展示口径），所以这里是 1；
+	// 若公告同步没被跳过，会多出一次公告用的 status 请求，变成 2。
+	if got := statusCalls.Load(); got != 1 {
+		t.Fatalf("status calls = %d, want 1", got)
 	}
 	logs, err := notifies.ListLogs(10)
 	if err != nil {

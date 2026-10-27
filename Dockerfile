@@ -10,7 +10,10 @@
 #   或在 docker-compose 里写 context: .
 
 # ---------- Stage 1: 前端 ----------
-FROM node:20-alpine AS frontend-builder
+# 前端产物是纯静态资源，与目标架构无关。固定用构建机原生架构执行，
+# 否则 buildx 会在 QEMU 模拟的 arm64 下把 pnpm install / vite build 再跑一遍，
+# 单这一步就要多花两三分钟。
+FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend-builder
 WORKDIR /web
 
 # pnpm-workspace.yaml 用了 allowBuilds: 这种 pnpm 10.4+ 才支持的字段，
@@ -28,7 +31,10 @@ COPY frontend/ ./
 RUN pnpm build
 
 # ---------- Stage 2: 后端 ----------
-FROM golang:1.23-alpine AS go-builder
+# Go 原生支持交叉编译，同样不需要 QEMU：在构建机原生架构上按 TARGETARCH 出目标平台二进制。
+FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS go-builder
+ARG TARGETOS=linux
+ARG TARGETARCH
 WORKDIR /src
 
 # 先 go.mod / go.sum 走缓存
@@ -42,7 +48,7 @@ COPY . ./
 RUN rm -rf ./web/dist
 COPY --from=frontend-builder /web/dist ./web/dist
 
-RUN CGO_ENABLED=0 GOOS=linux go build \
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
         -trimpath \
         -ldflags="-s -w" \
         -o /out/upstream-ops \

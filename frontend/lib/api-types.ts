@@ -138,6 +138,73 @@ export interface RateChangeLogPage {
   pages: number
 }
 
+/**
+ * 上游模型目录能力：
+ * - group_models   上游给出每个模型所属分组（NewAPI 的 enable_groups），可精确按分组展示
+ * - platform_pool  上游只有平台级模型池，分组与模型是平行集合，无映射（Sub2API）
+ */
+export type UpstreamCatalogCapability = "group_models" | "platform_pool"
+
+/** 目录降级原因；空表示正常 */
+export type UpstreamCatalogDegrade =
+  | ""
+  | "auth_expired"
+  | "fetch_failed"
+  | "no_pricing_api"
+
+export interface UpstreamCatalogGroup {
+  name: string
+  remote_id?: number | null
+  description?: string
+  ratio: number
+  /** ratio 是否为上游真实返回值（未授权分组通常为 false） */
+  has_ratio: boolean
+  /** 是否出现在当前账号的可用分组列表里；false 时没倍率也没描述 */
+  authorized: boolean
+  model_count: number
+  platform?: string
+  channel_group?: string
+}
+
+export interface UpstreamCatalogModel {
+  name: string
+  /** 该模型所属的全部分组；长度 >1 表示跨组共享 */
+  groups: string[]
+  vendor?: string
+  tags?: string[]
+  billing_mode?: string
+  /** 上游计费表达式原文（如 tier("base", p * 4 + c * 20)），用于 tooltip */
+  billing_expr?: string
+  /** 服务端解析出的可读摘要，如「入×4 · 出×20」「$0.02/次」 */
+  billing_brief?: string
+  model_ratio: number
+  completion_ratio: number
+  model_price: number
+  quota_type: number
+  cache_ratio?: number | null
+  create_cache_ratio?: number | null
+  endpoints?: string[]
+}
+
+export interface UpstreamCatalog {
+  capability: UpstreamCatalogCapability
+  degrade: UpstreamCatalogDegrade
+  degrade_message?: string
+  pricing_version?: string
+  groups: UpstreamCatalogGroup[]
+  models: UpstreamCatalogModel[]
+  notes?: string[]
+}
+
+/** GET /api/channels/:id/upstream-catalog 的响应 */
+export interface UpstreamCatalogResponse {
+  channel_id: number
+  data: UpstreamCatalog
+  fetched_at: string
+  /** 拉取失败时的错误摘要；此时 data.degrade 必有值 */
+  error?: string
+}
+
 export interface BalanceSnapshot {
   id: number
   channel_id: number

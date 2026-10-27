@@ -74,6 +74,12 @@ import { ChannelFormDialog } from "@/components/monitor/channel-form-dialog"
 import { ChannelRedeemDialog } from "@/components/monitor/channel-redeem-dialog"
 import { ChannelRechargeDialog } from "@/components/monitor/channel-recharge-dialog"
 import {
+  GroupModelsDialog,
+  GroupModelsPanel,
+  mergeGroupViews,
+  useGroupCatalog,
+} from "@/components/monitor/channel-group-models"
+import {
   ChannelAPIKeysDialog,
   type ChannelAPIKeyInitialAction,
 } from "@/components/monitor/channel-api-keys-dialog"
@@ -213,13 +219,34 @@ function ratioTone(r: number): string {
   return "bg-muted text-foreground ring-border"
 }
 
-/** InlineRates 在渠道卡片内部展示当前所有分组倍率，默认 2 行折叠 + 展开按钮。 */
+/**
+ * InlineRates 在渠道卡片内部展示当前所有分组倍率，默认 2 行折叠 + 展开按钮。
+ *
+ * 点击分组 chip 会在下方展开该分组的「上游模型」区（GroupModelsPanel），
+ * 「查看全部」打开全量弹层（GroupModelsDialog）。
+ *
+ * 注意两个「展开」是独立的：
+ *   - 卡片级 expanded 控制 chip 区高度（max-h-12 → max-h-150）
+ *   - chip 级 selectedGroup 控制模型区是否显示
+ *
+ * 目录数据懒加载：首次点开任意分组才请求，之后切分组复用同一份（后端另有 5 分钟缓存）。
+ */
 function InlineRates({ channel }: { channel: Channel }) {
   const { data, loading } = useChannelRates(channel.id, channel.only_created_key_groups_enabled)
   const rates = [...(data ?? [])].sort((a, b) => a.ratio - b.ratio)
   const [expanded, setExpanded] = useState(false)
   const [hasOverflow, setHasOverflow] = useState(false)
   const chipBoxRef = useRef<HTMLDivElement>(null)
+
+  // 选中的上游分组名（= RateSnapshot.model_name）。同一时刻只展开一个。
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
+  // 目录只在用户真正点开某个分组时才拉，避免每张卡片进页面都打上游。
+  const [catalogRequested, setCatalogRequested] = useState(false)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const { catalog, loading: catalogLoading, error: catalogError, refetch } = useGroupCatalog(
+    channel.id,
+    catalogRequested,
+  )
 
   // 监听 chip 容器尺寸变化，决定是否要显示"展开"按钮。
   // 收起状态下 scrollHeight > clientHeight 表示有内容被裁剪。
@@ -234,18 +261,47 @@ function InlineRates({ channel }: { channel: Channel }) {
     const ro = new ResizeObserver(check)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [rates.length, expanded])
+  }, [rates.length, catalog, expanded])
+
+  // 分组列表变化时，若当前选中的分组已不存在则收起，避免展开区悬空。
+  // 注意要同时看「本地快照」和「上游目录」：上游独有分组也算存在。
+  useEffect(() => {
+    if (!selectedGroup) return
+    const inSnapshots = rates.some((r) => r.model_name === selectedGroup)
+    const inCatalog = (catalog?.groups ?? []).some((g) => g.name === selectedGroup)
+    if (!inSnapshots && !inCatalog) setSelectedGroup(null)
+  }, [rates, catalog, selectedGroup])
 
   if (loading) return null
   if (rates.length === 0) return null
 
+  // 合并本地快照与上游目录：本地快照是历史累积，可能缺少上游新增的分组
+  // （实测码少本地 8 个、上游 12 个，差 4 个）。这些上游独有分组如果不显示，
+  // 用户就完全看不到它们，因此追加到列表末尾。
+  const views = mergeGroupViews(rates, catalog)
+  const upstreamOnlyCount = views.filter((v) => !v.snapshot).length
+
   const showToggle = hasOverflow || expanded
+  const handleChipClick = (name: string) => {
+    if (selectedGroup === name) {
+      setSelectedGroup(null)
+      return
+    }
+    setSelectedGroup(name)
+    setCatalogRequested(true)
+  }
 
   return (
     <div className="mt-3 border-t border-border pt-2.5">
       <div className="mb-1.5 flex items-center justify-between">
         <p className="text-[11px] text-muted-foreground">
-          {rates.length} 个分组
+          {views.length} 个分组
+          <span className="ml-1.5 text-muted-foreground/60">· 点分组看模型</span>
+          {upstreamOnlyCount > 0 ? (
+            <span className="ml-1.5 text-warning" title="这些分组在上游存在，但本地倍率快照还没同步到">
+              （{upstreamOnlyCount} 个未同步）
+            </span>
+          ) : null}
         </p>
         {showToggle ? (
           <button
@@ -273,41 +329,91 @@ function InlineRates({ channel }: { channel: Channel }) {
             expanded ? "max-h-150" : "max-h-12",
           )}
         >
-          {rates.map((r) => (
-            <Tooltip key={r.id} delayDuration={150}>
-              <TooltipTrigger asChild>
-                <span
-                  className={cn(
-                    "inline-flex cursor-default items-center gap-1 rounded px-1.5 py-0.5 text-[11px] ring-1 ring-inset transition-colors hover:bg-muted/60",
-                    ratioTone(r.ratio),
+          {views.map((v) => {
+            const active = selectedGroup === v.name
+            const snap = v.snapshot
+            // 上游独有分组没有本地倍率，用上游给的倍率兜底（没有就显示 ?）。
+            const ratioText = snap
+              ? formatRatio(snap.ratio)
+              : v.catalog?.has_ratio
+                ? formatRatio(v.catalog.ratio)
+                : "?"
+            return (
+              <Tooltip key={v.name} delayDuration={400}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => handleChipClick(v.name)}
+                    aria-expanded={active}
+                    className={cn(
+                      "inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] ring-1 ring-inset transition-colors",
+                      snap ? ratioTone(snap.ratio) : "bg-warning/10 text-warning ring-warning/30",
+                      active
+                        ? "ring-2 ring-brand/60"
+                        : "hover:bg-muted/60 hover:ring-border",
+                    )}
+                  >
+                    <span className="font-medium">{v.name}</span>
+                    {/* whitespace-nowrap：0.0415 这类四位小数在窄 chip 里会被折成「0.041 / 5」 */}
+                    <span className="whitespace-nowrap rounded bg-primary/10 px-1 font-semibold tabular-nums text-primary ring-1 ring-inset ring-primary/15">
+                      {ratioText}
+                    </span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs text-xs">
+                  <p className="font-medium">{v.name}</p>
+                  {snap?.description || v.catalog?.description ? (
+                    <p className="mt-0.5 text-muted-foreground">
+                      {snap?.description || v.catalog?.description}
+                    </p>
+                  ) : (
+                    <p className="mt-0.5 italic text-muted-foreground">{"(无描述)"}</p>
                   )}
-                >
-                  <span className="font-medium">{r.model_name}</span>
-                  <span className="rounded bg-primary/10 px-1 font-semibold tabular-nums text-primary ring-1 ring-inset ring-primary/15">
-                    {formatRatio(r.ratio)}
-                  </span>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="top" className="max-w-xs text-xs">
-                <p className="font-medium">{r.model_name}</p>
-                {r.description ? (
-                  <p className="mt-0.5 text-muted-foreground">{r.description}</p>
-                ) : (
-                  <p className="mt-0.5 italic text-muted-foreground">{"(无描述)"}</p>
-                )}
-                <p className="mt-0.5 text-muted-foreground">
-                  {"最近更新："}
-                  {relativeTime(r.last_seen_at)}
-                </p>
-              </TooltipContent>
-            </Tooltip>
-          ))}
+                  {snap ? (
+                    <p className="mt-0.5 text-muted-foreground">
+                      {"最近更新："}
+                      {relativeTime(snap.last_seen_at)}
+                    </p>
+                  ) : (
+                    <p className="mt-0.5 text-warning">{"上游存在，但本地倍率快照未同步"}</p>
+                  )}
+                  <p className="mt-0.5 text-muted-foreground">{"点击查看该分组的模型"}</p>
+                </TooltipContent>
+              </Tooltip>
+            )
+          })}
         </div>
         {/* 折叠时底部淡出，提示还有更多内容 */}
         {!expanded && hasOverflow ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-4 bg-linear-to-t from-background to-transparent" />
         ) : null}
+
+        {/* 模型面板做成绝对定位浮层：不参与卡片布局，避免撑高卡片、
+            打乱同一行卡片的高度对齐。anchor 是上面这块 relative 容器。 */}
+        {selectedGroup ? (
+          <div className="absolute inset-x-0 top-full z-30 mt-1">
+            <GroupModelsPanel
+              group={selectedGroup}
+              catalog={catalog}
+              loading={catalogLoading}
+              error={catalogError}
+              onOpenAll={() => setDialogOpen(true)}
+              onRetry={refetch}
+            />
+          </div>
+        ) : null}
       </div>
+
+      <GroupModelsDialog
+        channel={channel}
+        group={selectedGroup}
+        catalog={catalog}
+        loading={catalogLoading}
+        error={catalogError}
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        onRetry={refetch}
+      />
     </div>
   )
 }

@@ -21,6 +21,7 @@ import type {
   RateSnapshot,
   SystemConfigResponse,
   UpstreamAnnouncementPage,
+  UpstreamCatalog,
 } from "@/lib/api-types"
 
 export interface QueryState<T> {
@@ -238,6 +239,25 @@ export function useChannelRates(channelID: number | null, onlyWithKeys = false) 
         ? `/channels/${channelID}/rates?only_with_keys=1`
         : `/channels/${channelID}/rates`
   return useApi<RateSnapshot[]>(path)
+}
+
+/**
+ * 上游模型目录（分组 → 模型）。
+ *
+ * enabled=false 时不发请求（用于「点开分组才加载」的懒加载语义）。
+ * 结果由 fetchShared 缓存，并在 useApi 内跟随全局 refresh tick 刷新；
+ * 后端另有 5 分钟缓存，所以切分组不会重复打上游。
+ *
+ * 注意：apiFetch 会自动解包响应里的 { data }，所以这里拿到的是 UpstreamCatalog 本身，
+ * 而不是 { channel_id, data, fetched_at } 外层——错误摘要也随之外层丢失，
+ * 需要时用 catalog.degrade_message 兜底展示。
+ */
+export function useUpstreamCatalog(channelID: number | null, enabled = true) {
+  const path =
+    channelID == null || !enabled
+      ? null
+      : `/channels/${channelID}/upstream-catalog`
+  return useApi<UpstreamCatalog>(path)
 }
 
 // useMultiChannelRates 把多个上游渠道的倍率分组拉回来合并去重，

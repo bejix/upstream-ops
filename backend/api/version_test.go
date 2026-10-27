@@ -21,6 +21,15 @@ func TestIsVersionNewer(t *testing.T) {
 		{latest: "v0.2.1", current: "0.2.0", want: true},
 		{latest: "0.2.0", current: "v0.2.0", want: false},
 		{latest: "0.1.9", current: "0.2.0", want: false},
+		// 四段式：本项目发过 v0.0.10.1，旧实现写死三段会让这类版本永远检测不到更新。
+		{latest: "0.0.10.2", current: "0.0.10.1", want: true},
+		{latest: "0.0.10.1", current: "0.0.10.2", want: false},
+		{latest: "0.0.11", current: "0.0.10.2", want: true},
+		{latest: "0.0.10.2", current: "0.0.10", want: true},
+		// 非法形态不应误报更新。
+		{latest: "not-a-version", current: "0.0.10", want: false},
+		{latest: "", current: "0.0.10", want: false},
+		{latest: "1.2.3.4.5", current: "0.0.10", want: false},
 	}
 	for _, tt := range tests {
 		if got := isVersionNewer(tt.latest, tt.current); got != tt.want {

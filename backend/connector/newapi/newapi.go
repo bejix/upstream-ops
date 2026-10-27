@@ -395,10 +395,19 @@ func (c *Client) GetCosts(ctx context.Context, ch *connector.Channel, session *c
 }
 
 func (c *Client) GetRates(ctx context.Context, ch *connector.Channel, session *connector.AuthSession) ([]connector.RateResult, error) {
-	body, err := c.getJSON(ctx, strings.TrimRight(ch.SiteURL, "/")+"/api/user/self/groups", session)
+	site := strings.TrimRight(ch.SiteURL, "/")
+	body, err := c.getJSON(ctx, site+"/api/user/self/groups", session)
 	if err != nil {
 		return nil, fmt.Errorf("newapi groups: %w", err)
 	}
+	// 分组倍率要按站点展示口径换算，否则和站点 UI 上的数字对不上。
+	// 站点若把 /api/status 打挂了，宁可本次采集失败也不要写入错误口径的数据
+	// （否则会在 rate_change_logs 里制造一次假的倍率变动）。
+	scale, err := c.groupRatioScale(ctx, site)
+	if err != nil {
+		return nil, err
+	}
+
 	// data: { "default": { "ratio": 1, "desc": "..." }, "auto": { "ratio": "自动", ... } }
 	raw := map[string]struct {
 		Ratio json.RawMessage `json:"ratio"`
@@ -413,6 +422,9 @@ func (c *Client) GetRates(ctx context.Context, ch *connector.Channel, session *c
 		if err := json.Unmarshal(v.Ratio, &ratio); err != nil {
 			// "auto" 组的 ratio 是字符串 "自动"，跳过。
 			continue
+		}
+		if scale != 1 {
+			ratio = round4(ratio * scale)
 		}
 		out = append(out, connector.RateResult{
 			ModelName:   name,
@@ -1057,6 +1069,44 @@ func (c *Client) quotaToUSD(quota float64, quotaPerUnit float64) float64 {
 	return round4(quota / quotaPerUnit)
 }
 
+// newAPIStatus 是 /api/status 里与计价口径相关的字段。
+type newAPIStatus struct {
+	QuotaPerUnit               float64 `json:"quota_per_unit"`
+	Price                      float64 `json:"price"`
+	QuotaDisplayType           string  `json:"quota_display_type"`
+	CustomCurrencyExchangeRate float64 `json:"custom_currency_exchange_rate"`
+}
+
+// newAPIGroupRatioScale 返回「站点展示口径」下分组倍率的缩放系数。
+//
+// NewAPI 的 /api/user/self/groups 返回的是以美元计价的原始倍率，但站点前端
+// 会按 quota_display_type 决定展示方式：
+//
+//   - USD（或未配置）：直接展示原始倍率，系数 1；
+//   - CNY：展示为「元」口径，即 原始倍率 × price；
+//   - CUSTOM：展示为自定义货币口径，即 原始倍率 × custom_currency_exchange_rate。
+//
+// 例：xem 站点 quota_display_type=CNY、price=0.1，接口给 claude=4.55，
+// 站点 UI 显示 0.455x，正是 4.55×0.1。
+//
+// 系数取不到（<=0）时退回 1，保证不会把倍率算成 0 或负数。
+func newAPIGroupRatioScale(status newAPIStatus) float64 {
+	switch strings.ToUpper(strings.TrimSpace(status.QuotaDisplayType)) {
+	case "", "USD":
+		return 1
+	case "CUSTOM":
+		if status.CustomCurrencyExchangeRate > 0 {
+			return status.CustomCurrencyExchangeRate
+		}
+		return 1
+	default:
+		if status.Price > 0 {
+			return status.Price
+		}
+		return 1
+	}
+}
+
 func newAPIRechargeMultiplier(ch *connector.Channel, price float64) *float64 {
 	if ch.RechargeMultiplier != nil && *ch.RechargeMultiplier > 0 {
 		return ch.RechargeMultiplier
@@ -1191,10 +1241,31 @@ func dedupeAnnouncements(items []connector.AnnouncementResult) []connector.Annou
 	return out
 }
 
+// groupRatioScale 取站点展示口径的分组倍率缩放系数。
+//
+// 倍率采集（GetRates）与网关选路（newAPIGroupMap → ListAPIKeyGroups）必须用同一套
+// 口径，否则监控页看到的倍率和网关实际计费用的倍率会差一个系数。
+func (c *Client) groupRatioScale(ctx context.Context, site string) (float64, error) {
+	body, err := c.getJSON(ctx, site+"/api/status", nil)
+	if err != nil {
+		return 1, fmt.Errorf("newapi status (for group ratio scale): %w", err)
+	}
+	var status newAPIStatus
+	if err := json.Unmarshal(body, &status); err != nil {
+		return 1, fmt.Errorf("newapi status decode (for group ratio scale): %w", err)
+	}
+	return newAPIGroupRatioScale(status), nil
+}
+
 func (c *Client) newAPIGroupMap(ctx context.Context, ch *connector.Channel, session *connector.AuthSession) (map[string]connector.APIKeyGroup, error) {
-	body, err := c.getJSON(ctx, strings.TrimRight(ch.SiteURL, "/")+"/api/user/self/groups", session)
+	site := strings.TrimRight(ch.SiteURL, "/")
+	body, err := c.getJSON(ctx, site+"/api/user/self/groups", session)
 	if err != nil {
 		return nil, fmt.Errorf("newapi api key groups: %w", err)
+	}
+	scale, err := c.groupRatioScale(ctx, site)
+	if err != nil {
+		return nil, err
 	}
 	raw := map[string]struct {
 		Ratio json.RawMessage `json:"ratio"`
@@ -1208,6 +1279,9 @@ func (c *Client) newAPIGroupMap(ctx context.Context, ch *connector.Channel, sess
 		var ratio float64
 		if err := json.Unmarshal(v.Ratio, &ratio); err != nil {
 			continue
+		}
+		if scale != 1 {
+			ratio = round4(ratio * scale)
 		}
 		out[name] = connector.APIKeyGroup{
 			Name:        name,
